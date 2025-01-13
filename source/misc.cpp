@@ -165,9 +165,6 @@ namespace async_postgres::lua {
         PQfreemem(unescaped);
         return 1;
     }
-
-    // 34.3. Asynchronous Command Processing
-    lua_bool_getter(isBusy, PQisBusy);
 }  // namespace async_postgres::lua
 
 #define register_lua_fn(name)                      \
@@ -197,5 +194,4 @@ void async_postgres::register_misc_connection_functions(
     register_lua_fn(escapeIdentifier);
     register_lua_fn(escapeBytea);
     register_lua_fn(unescapeBytea);
-    register_lua_fn(isBusy);
 }

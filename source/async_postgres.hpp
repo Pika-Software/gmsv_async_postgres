@@ -42,6 +42,24 @@ namespace GLua = GarrysMod::Lua;
     int name##__Imp([[maybe_unused]] GarrysMod::Lua::ILuaInterface* lua)
 
 namespace async_postgres {
+    typedef std::variant<std::nullptr_t, std::string, double, bool> ParamValue;
+
+    struct ParamValues {
+        ParamValues(int n_params)
+            : strings(n_params),
+              values(n_params),
+              lengths(n_params, 0),
+              formats(n_params, 0) {}
+
+        inline int length() const { return strings.size(); }
+
+        std::vector<std::string> strings;
+        // vectors below are used in PQexecParams-like functions
+        std::vector<const char*> values;
+        std::vector<int> lengths;
+        std::vector<int> formats;
+    };
+
     struct SocketStatus {
         bool read_ready = false;
         bool write_ready = false;
@@ -54,7 +72,7 @@ namespace async_postgres {
 
     struct ParameterizedCommand {
         std::string command;
-        std::vector<std::string> values;
+        ParamValues param;
     };
 
     struct Query {
@@ -108,5 +126,7 @@ namespace async_postgres {
     // util.cpp
     std::string_view get_string(GLua::ILuaInterface* lua, int index = -1);
     void pcall(GLua::ILuaInterface* lua, int nargs, int nresults);
+    // Converts a lua array at given index to a ParamValues
+    ParamValues array_to_params(GLua::ILuaInterface* lua, int index);
     SocketStatus check_socket_status(PGconn* conn);
 };  // namespace async_postgres
