@@ -150,6 +150,7 @@ void register_connection_mt(GLua::ILuaInterface* lua) {
     register_lua_fn(__newindex);
     register_lua_fn(__gc);
     register_lua_fn(query);
+    register_lua_fn(queryParams);
     register_lua_fn(reset);
 
     async_postgres::register_misc_connection_functions(lua);

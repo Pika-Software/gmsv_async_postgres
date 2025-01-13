@@ -9,15 +9,21 @@ inline bool send_query(PGconn* conn, Query& query) {
         return PQsendQuery(conn, command->command.c_str()) == 1;
     } else if (const auto* command =
                    std::get_if<ParameterizedCommand>(&query.command)) {
+        // TODO: support binary format
         size_t nParams = command->values.size();
         std::vector<const char*> paramValues(nParams);
+        std::vector<int> paramLengths(nParams);
+        std::vector<int> paramFormats(nParams, 1);
         for (size_t i = 0; i < nParams; i++) {
-            paramValues[i] = command->values[i].c_str();
+            const auto& value = command->values[i];
+            paramValues[i] = value.c_str();
+            paramLengths[i] = value.size();
         }
 
         bool success =
             PQsendQueryParams(conn, command->command.c_str(), nParams, nullptr,
-                              paramValues.data(), nullptr, nullptr, 0) == 1;
+                              paramValues.data(), paramLengths.data(),
+                              paramFormats.data(), 1) == 1;
 
         return success;
     }

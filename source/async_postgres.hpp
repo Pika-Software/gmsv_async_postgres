@@ -104,6 +104,7 @@ namespace async_postgres {
 
     // misc.cpp
     void register_misc_connection_functions(GLua::ILuaInterface* lua);
+    std::vector<std::optional<std::string>> lua_array_to_params();
 
     // util.cpp
     std::string_view get_string(GLua::ILuaInterface* lua, int index = -1);
