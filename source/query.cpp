@@ -18,11 +18,23 @@ inline bool send_query(PGconn* conn, Query& query) {
     return false;
 }
 
-void query_failed(GLua::ILuaInterface* lua, PGconn* conn, Query& query) {
+// This function will remove the query from the connection state
+// and call the callback with the error message
+void query_failed(GLua::ILuaInterface* lua, Connection* state) {
+    if (!state->query) {
+        return;
+    }
+
+    auto query = std::move(*state->query);
+    lua->Msg("[async_postgres] query failed: current query %d\n",
+             state->query.has_value());
+
+    state->query.reset();
+
     if (query.callback) {
         query.callback.Push();
         lua->PushBool(false);
-        lua->PushString(PQerrorMessage(conn));
+        lua->PushString(PQerrorMessage(state->conn.get()));
         pcall(lua, 2, 0);
     }
 }
@@ -54,24 +66,19 @@ bool bad_result(PGresult* result) {
            status == PGRES_FATAL_ERROR;
 }
 
-void async_postgres::process_queries(GLua::ILuaInterface* lua,
-                                     Connection* state) {
-    if (state->queries.empty()) {
+void async_postgres::process_query(GLua::ILuaInterface* lua,
+                                   Connection* state) {
+    if (!state->query || state->reset_event) {
         // no queries to process
-        return;
-    }
-
-    if (state->reset_event) {
         // don't process queries while reconnecting
         return;
     }
 
-    auto& query = state->queries.front();
+    auto& query = state->query.value();
     if (!query.sent) {
         if (!send_query(state->conn.get(), query)) {
-            query_failed(lua, state->conn.get(), query);
-            state->queries.pop();
-            return process_queries(lua, state);
+            query_failed(lua, state);
+            return process_query(lua, state);
         }
 
         query.sent = true;
@@ -79,17 +86,17 @@ void async_postgres::process_queries(GLua::ILuaInterface* lua,
     }
 
     if (!poll_query(state->conn.get(), query)) {
-        query_failed(lua, state->conn.get(), query);
-        state->queries.pop();
-        return process_queries(lua, state);
+        query_failed(lua, state);
+        return process_query(lua, state);
     }
 
     while (PQisBusy(state->conn.get()) == 0) {
         auto result = pg::getResult(state->conn);
         if (!result) {
             // query is done
-            state->queries.pop();
-            return process_queries(lua, state);
+            // TODO: remove query if we have a final result
+            state->query.reset();
+            return process_query(lua, state);
         }
 
         if (query.callback) {

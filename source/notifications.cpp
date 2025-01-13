@@ -13,8 +13,7 @@ void async_postgres::process_notifications(GLua::ILuaInterface* lua,
         return;
     }
 
-    if (state->queries.empty() &&
-        check_socket_status(state->conn.get()).read_ready &&
+    if (!state->query && check_socket_status(state->conn.get()).read_ready &&
         PQconsumeInput(state->conn.get()) == 0) {
         // we consumed input
         // but there was some error

@@ -23,7 +23,7 @@ namespace async_postgres::lua {
 
             async_postgres::process_reset(lua, state);
             async_postgres::process_notifications(lua, state);
-            async_postgres::process_queries(lua, state);
+            async_postgres::process_query(lua, state);
         }
 
         return 0;
@@ -47,14 +47,18 @@ namespace async_postgres::lua {
         lua->CheckType(3, GLua::Type::Function);
 
         auto state = lua_connection_state();
+        if (state->query) {
+            throw std::runtime_error("query already in progress");
+        }
 
         async_postgres::SimpleCommand command = {lua->GetString(2)};
         async_postgres::Query query = {std::move(command)};
-        if (!lua->IsType(3, GLua::Type::Nil)) {
+
+        if (lua->IsType(3, GLua::Type::Function)) {
             query.callback = GLua::AutoReference(lua, 3);
         }
 
-        state->queries.push(std::move(query));
+        state->query = std::move(query);
         return 0;
     }
 
@@ -65,15 +69,21 @@ namespace async_postgres::lua {
         lua->CheckType(4, GLua::Type::Function);
 
         auto state = lua_connection_state();
+        if (state->query) {
+            throw std::runtime_error("query already in progress");
+        }
 
         async_postgres::ParameterizedCommand command = {
             lua->GetString(2),
             async_postgres::array_to_params(lua, 3),
         };
-
         async_postgres::Query query = {std::move(command)};
-        query.callback = GLua::AutoReference(lua, 4);
-        state->queries.push(std::move(query));
+
+        if (lua->IsType(4, GLua::Type::Function)) {
+            query.callback = GLua::AutoReference(lua, 4);
+        }
+
+        state->query = std::move(query);
 
         return 0;
     }
@@ -82,7 +92,7 @@ namespace async_postgres::lua {
         lua->CheckType(1, async_postgres::connection_meta);
 
         GLua::AutoReference callback;
-        if (!lua->IsType(2, GLua::Type::Nil)) {
+        if (lua->IsType(2, GLua::Type::Function)) {
             callback = GLua::AutoReference(lua, 2);
         }
 

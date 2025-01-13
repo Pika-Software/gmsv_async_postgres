@@ -89,7 +89,7 @@ namespace async_postgres {
 
     struct Connection {
         pg::conn conn;
-        std::queue<Query> queries;
+        std::optional<Query> query;
         std::optional<ResetEvent> reset_event;
         GLua::AutoReference on_notify;
 
@@ -113,7 +113,7 @@ namespace async_postgres {
     void process_notifications(GLua::ILuaInterface* lua, Connection* state);
 
     // query.cpp
-    void process_queries(GLua::ILuaInterface* lua, Connection* state);
+    void process_query(GLua::ILuaInterface* lua, Connection* state);
 
     // result.cpp
     void create_result_table(GLua::ILuaInterface* lua, PGresult* result);
