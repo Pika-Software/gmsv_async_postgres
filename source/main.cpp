@@ -101,21 +101,10 @@ namespace async_postgres::lua {
 
         auto state = lua_connection_state();
 
-        async_postgres::ParameterizedCommand command = {lua->GetString(2)};
-
-        lua->Push(3);
-        for (int i = 1;; i++) {
-            lua->PushNumber(i);
-            lua->GetTable(-2);
-            if (lua->IsType(-1, GLua::Type::Nil)) {
-                lua->Pop(2);
-                break;
-            }
-
-            auto str = get_string(lua, -1);
-            command.values.push_back({str.data(), str.size()});
-            lua->Pop(1);
-        }
+        async_postgres::ParameterizedCommand command = {
+            lua->GetString(2),
+            async_postgres::array_to_params(lua, 3),
+        };
 
         async_postgres::Query query = {std::move(command)};
         query.callback = GLua::AutoReference(lua, 4);

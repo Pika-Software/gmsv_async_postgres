@@ -33,6 +33,42 @@ void async_postgres::pcall(GLua::ILuaInterface* lua, int nargs, int nresults) {
     lua->Pop();  // ErrorNoHaltWithStack
 }
 
+ParamValues async_postgres::array_to_params(GLua::ILuaInterface* lua,
+                                            int index) {
+    lua->Push(index);
+    int len = lua->ObjLen(-1);
+
+    ParamValues param(len);
+    for (int i = 0; i < len; i++) {
+        lua->PushNumber(i + 1);
+        lua->GetTable(-2);
+
+        auto type = lua->GetType(-1);
+        if (type == GLua::Type::String) {
+            auto value = get_string(lua, -1);
+            param.strings[i] = std::string(value.data(), value.size());
+            param.values[i] = param.strings[i].c_str();
+            param.lengths[i] = value.length();
+            param.formats[i] = 1;
+        } else if (type == GLua::Type::Number) {
+            param.strings[i] = std::to_string(lua->GetNumber(-1));
+            param.values[i] = param.strings[i].c_str();
+        } else if (type == GLua::Type::Bool) {
+            param.values[i] = lua->GetBool(-1) ? "true" : "false";
+        } else if (type == GLua::Type::Nil) {
+            param.values[i] = nullptr;
+        } else {
+            throw std::runtime_error(
+                "unsupported type given into params array");
+        }
+
+        lua->Pop(1);
+    }
+
+    lua->Pop(1);
+    return param;
+}
+
 #if SYSTEM_IS_WINDOWS
 #include <WinSock2.h>
 #define poll WSAPoll
