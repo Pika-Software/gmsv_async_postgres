@@ -6,9 +6,6 @@ std::vector<Connection*> async_postgres::connections = {};
 
 Connection::Connection(GLua::ILuaInterface* lua, pg::conn&& conn)
     : conn(std::move(conn)) {
-    lua->CreateTable();
-    this->lua_table = GLua::AutoReference(lua);
-
     // add connection to global list
     connections.push_back(this);
 }

@@ -12,41 +12,6 @@ namespace async_postgres::lua {
         return 0;
     }
 
-    lua_protected_fn(__index) {
-        auto state = lua_connection_state();
-
-        state->lua_table.Push();
-        lua->Push(2);
-        lua->GetTable(-2);
-        if (!lua->IsType(-1, GLua::Type::Nil)) {
-            return 1;
-        }
-
-        // is it alright if I don't pop previous stack values?
-
-        lua->PushMetaTable(async_postgres::connection_meta);
-        lua->Push(2);
-        lua->GetTable(-2);
-
-        return 1;
-    }
-
-    lua_protected_fn(__newindex) {
-        auto state = lua_connection_state();
-
-        state->lua_table.Push();
-        lua->Push(2);
-        lua->Push(3);
-        lua->SetTable(-3);
-
-        auto key = get_string(lua, 2);
-        if (key == "on_notify") {
-            state->receive_notifications = !lua->IsType(3, GLua::Type::Nil);
-        }
-
-        return 1;
-    }
-
     lua_protected_fn(loop) {
         async_postgres::process_pending_connections(lua);
 
@@ -126,6 +91,16 @@ namespace async_postgres::lua {
 
         return 0;
     }
+
+    lua_protected_fn(setNotifyCallback) {
+        lua->CheckType(1, async_postgres::connection_meta);
+        lua->CheckType(2, GLua::Type::Function);
+
+        auto state = lua_connection_state();
+        state->on_notify = GLua::AutoReference(lua, 2);
+
+        return 0;
+    }
 }  // namespace async_postgres::lua
 
 #define register_lua_fn(name)                      \
@@ -135,12 +110,14 @@ namespace async_postgres::lua {
 void register_connection_mt(GLua::ILuaInterface* lua) {
     async_postgres::connection_meta = lua->CreateMetaTable("PGconn");
 
-    register_lua_fn(__index);
-    register_lua_fn(__newindex);
+    lua->Push(-1);
+    lua->SetField(-2, "__index");
+
     register_lua_fn(__gc);
     register_lua_fn(query);
     register_lua_fn(queryParams);
     register_lua_fn(reset);
+    register_lua_fn(setNotifyCallback);
 
     async_postgres::register_misc_connection_functions(lua);
 

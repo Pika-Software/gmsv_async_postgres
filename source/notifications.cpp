@@ -2,18 +2,6 @@
 
 using namespace async_postgres;
 
-bool push_on_notify(GLua::ILuaInterface* lua, Connection* state) {
-    state->lua_table.Push();
-    lua->GetField(-1, "on_notify");
-    lua->Remove(-2);  // remove the connection table
-
-    if (lua->IsType(-1, GLua::Type::Nil)) {
-        lua->Pop();
-        return false;
-    }
-    return true;
-}
-
 void async_postgres::process_notifications(GLua::ILuaInterface* lua,
                                            Connection* state) {
     if (state->reset_event) {
@@ -21,7 +9,7 @@ void async_postgres::process_notifications(GLua::ILuaInterface* lua,
         return;
     }
 
-    if (!state->receive_notifications) {
+    if (!state->on_notify) {
         return;
     }
 
@@ -34,7 +22,7 @@ void async_postgres::process_notifications(GLua::ILuaInterface* lua,
     }
 
     while (auto notify = pg::getNotify(state->conn)) {
-        if (push_on_notify(lua, state)) {
+        if (state->on_notify.Push()) {
             lua->PushString(notify->relname);  // arg 1 channel name
             lua->PushString(notify->extra);    // arg 2 payload
             lua->PushNumber(notify->be_pid);   // arg 3 backend pid

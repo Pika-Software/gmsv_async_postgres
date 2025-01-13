@@ -89,11 +89,9 @@ namespace async_postgres {
 
     struct Connection {
         pg::conn conn;
-        GLua::AutoReference lua_table;
         std::queue<Query> queries;
         std::optional<ResetEvent> reset_event;
-        bool receive_notifications =
-            false;  // enabled if on_notify lua field is set
+        GLua::AutoReference on_notify;
 
         Connection(GLua::ILuaInterface* lua, pg::conn&& conn);
         ~Connection();

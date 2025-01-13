@@ -74,11 +74,12 @@ ParamValues async_postgres::array_to_params(GLua::ILuaInterface* lua,
 #define poll WSAPoll
 #else
 #include <poll.h>
+#define SOCKET int
 #endif
 
 SocketStatus async_postgres::check_socket_status(PGconn* conn) {
     SocketStatus status = {};
-    int fd = PQsocket(conn);
+    SOCKET fd = PQsocket(conn);
     if (fd < 0) {
         status.failed = true;
         return status;
