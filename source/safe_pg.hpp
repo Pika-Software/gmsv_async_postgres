@@ -23,4 +23,8 @@ namespace async_postgres::pg {
     inline notify getNotify(conn& conn) {
         return notify(PQnotifies(conn.get()), &PQfreemem);
     }
+
+    // misc
+
+    inline bool isBusy(conn& conn) { return PQisBusy(conn.get()) == 1; }
 }  // namespace async_postgres::pg
