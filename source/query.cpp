@@ -26,9 +26,6 @@ void query_failed(GLua::ILuaInterface* lua, Connection* state) {
     }
 
     auto query = std::move(*state->query);
-    lua->Msg("[async_postgres] query failed: current query %d\n",
-             state->query.has_value());
-
     state->query.reset();
 
     if (query.callback) {
@@ -118,7 +115,7 @@ void process_result(GLua::ILuaInterface* lua, Connection* state,
 
 void async_postgres::process_query(GLua::ILuaInterface* lua,
                                    Connection* state) {
-    if (!state->query || state->reset_event) {
+    if (!state->query) {
         // no queries to process
         // don't process queries while reconnecting
         return;
@@ -135,10 +132,14 @@ void async_postgres::process_query(GLua::ILuaInterface* lua,
         query.flushed = PQflush(state->conn.get()) == 0;
     }
 
-    if (!poll_query(state->conn.get(), query)) {
-        query_failed(lua, state);
-        return process_query(lua, state);
-    }
+    // if (!poll_query(state->conn.get(), query)) {
+    //     query_failed(lua, state);
+    //     return process_query(lua, state);
+    // }
+
+    // probably failed poll should not result
+    // in query failure
+    poll_query(state->conn.get(), query);
 
     // ensure that getting result won't block
     if (!pg::isBusy(state->conn)) {

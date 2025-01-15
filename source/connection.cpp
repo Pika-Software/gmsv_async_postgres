@@ -126,21 +126,23 @@ void async_postgres::process_reset(GLua::ILuaInterface* lua,
 
     event.status = PQresetPoll(state->conn.get());
     if (event.status == PGRES_POLLING_OK) {
-        for (auto& callback : event.callbacks) {
+        auto callbacks = std::move(event.callbacks);
+        state->reset_event.reset();
+
+        for (auto& callback : callbacks) {
             callback.Push();
             lua->PushBool(true);
             pcall(lua, 1, 0);
         }
-
-        state->reset_event.reset();
     } else if (event.status == PGRES_POLLING_FAILED) {
-        for (auto& callback : event.callbacks) {
+        auto callbacks = std::move(event.callbacks);
+        state->reset_event.reset();
+
+        for (auto& callback : callbacks) {
             callback.Push();
             lua->PushBool(false);
             lua->PushString(PQerrorMessage(state->conn.get()));
             pcall(lua, 2, 0);
         }
-
-        state->reset_event.reset();
     }
 }

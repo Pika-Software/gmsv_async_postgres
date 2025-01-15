@@ -4,11 +4,6 @@ using namespace async_postgres;
 
 void async_postgres::process_notifications(GLua::ILuaInterface* lua,
                                            Connection* state) {
-    if (state->reset_event) {
-        // don't process notifications while reconnecting
-        return;
-    }
-
     if (!state->on_notify) {
         return;
     }

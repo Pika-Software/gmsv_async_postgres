@@ -21,9 +21,9 @@ namespace async_postgres::lua {
                 continue;
             }
 
-            async_postgres::process_reset(lua, state);
             async_postgres::process_notifications(lua, state);
             async_postgres::process_query(lua, state);
+            async_postgres::process_reset(lua, state);
         }
 
         return 0;
