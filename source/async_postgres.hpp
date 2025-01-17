@@ -136,6 +136,8 @@ namespace async_postgres {
     void process_notifications(GLua::ILuaInterface* lua, Connection* state);
 
     // query.cpp
+    void process_result(GLua::ILuaInterface* lua, Connection* state,
+                        pg::result&& result);
     void process_query(GLua::ILuaInterface* lua, Connection* state);
 
     // result.cpp

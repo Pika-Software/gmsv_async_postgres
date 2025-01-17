@@ -92,8 +92,8 @@ inline bool poll_query(PGconn* conn, Query& query) {
     return true;
 }
 
-void process_result(GLua::ILuaInterface* lua, Connection* state,
-                    pg::result&& result) {
+void async_postgres::process_result(GLua::ILuaInterface* lua, Connection* state,
+                                    pg::result&& result) {
     // query is done
     if (!result) {
         state->query.reset();

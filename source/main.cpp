@@ -200,6 +200,33 @@ namespace async_postgres::lua {
 
         return 0;
     }
+
+    lua_protected_fn(wait) {
+        lua->CheckType(1, async_postgres::connection_meta);
+
+        auto state = lua_connection_state();
+        if (state->query) {
+            auto& query = state->query.value();
+
+            // if query wasn't sent, send in through process_query
+            if (!query.sent) {
+                async_postgres::process_query(lua, state);
+            }
+
+            // while query is the same and it's not done
+            while (state->query.has_value() &&
+                   &query == &state->query.value()) {
+                async_postgres::process_result(lua, state,
+                                               pg::getResult(state->conn));
+            }
+
+            lua->PushBool(true);
+            return 1;
+        }
+
+        lua->PushBool(false);
+        return 1;
+    }
 }  // namespace async_postgres::lua
 
 #define register_lua_fn(name)                      \
@@ -221,6 +248,7 @@ void register_connection_mt(GLua::ILuaInterface* lua) {
     register_lua_fn(describePortal);
     register_lua_fn(reset);
     register_lua_fn(setNotifyCallback);
+    register_lua_fn(wait);
 
     async_postgres::register_misc_connection_functions(lua);
 
