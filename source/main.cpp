@@ -135,6 +135,48 @@ namespace async_postgres::lua {
         return 0;
     }
 
+    lua_protected_fn(describePrepared) {
+        lua->CheckType(1, async_postgres::connection_meta);
+        lua->CheckType(2, GLua::Type::String);
+        lua->CheckType(3, GLua::Type::Function);
+
+        auto state = lua_connection_state();
+        if (state->query) {
+            throw std::runtime_error("query already in progress");
+        }
+
+        async_postgres::DescribePreparedCommand command = {lua->GetString(2)};
+        async_postgres::Query query = {std::move(command)};
+
+        if (lua->IsType(3, GLua::Type::Function)) {
+            query.callback = GLua::AutoReference(lua, 3);
+        }
+
+        state->query = std::move(query);
+        return 0;
+    }
+
+    lua_protected_fn(describePortal) {
+        lua->CheckType(1, async_postgres::connection_meta);
+        lua->CheckType(2, GLua::Type::String);
+        lua->CheckType(3, GLua::Type::Function);
+
+        auto state = lua_connection_state();
+        if (state->query) {
+            throw std::runtime_error("query already in progress");
+        }
+
+        async_postgres::DescribePortalCommand command = {lua->GetString(2)};
+        async_postgres::Query query = {std::move(command)};
+
+        if (lua->IsType(3, GLua::Type::Function)) {
+            query.callback = GLua::AutoReference(lua, 3);
+        }
+
+        state->query = std::move(query);
+        return 0;
+    }
+
     lua_protected_fn(reset) {
         lua->CheckType(1, async_postgres::connection_meta);
 
@@ -175,6 +217,8 @@ void register_connection_mt(GLua::ILuaInterface* lua) {
     register_lua_fn(queryParams);
     register_lua_fn(prepare);
     register_lua_fn(queryPrepared);
+    register_lua_fn(describePrepared);
+    register_lua_fn(describePortal);
     register_lua_fn(reset);
     register_lua_fn(setNotifyCallback);
 

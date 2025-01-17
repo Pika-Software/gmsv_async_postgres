@@ -85,10 +85,19 @@ namespace async_postgres {
         ParamValues param;
     };
 
+    struct DescribePreparedCommand {
+        std::string name;
+    };
+
+    struct DescribePortalCommand {
+        std::string name;
+    };
+
     struct Query {
         using CommandVariant =
             std::variant<SimpleCommand, ParameterizedCommand,
-                         CreatePreparedCommand, PreparedCommand>;
+                         CreatePreparedCommand, PreparedCommand,
+                         DescribePreparedCommand, DescribePortalCommand>;
 
         CommandVariant command;
         GLua::AutoReference callback;

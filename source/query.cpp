@@ -24,6 +24,10 @@ inline bool send_query(PGconn* conn, Query& query) {
                    conn, command->name.c_str(), command->param.length(),
                    command->param.values.data(), command->param.lengths.data(),
                    command->param.formats.data(), 0) == 1;
+    } else if (get_if_command(DescribePreparedCommand)) {
+        return PQsendDescribePrepared(conn, command->name.c_str()) == 1;
+    } else if (get_if_command(DescribePortalCommand)) {
+        return PQsendDescribePortal(conn, command->name.c_str()) == 1;
     }
     return false;
 }
