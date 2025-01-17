@@ -45,13 +45,12 @@ ParamValues async_postgres::array_to_params(GLua::ILuaInterface* lua,
 
         auto type = lua->GetType(-1);
         if (type == GLua::Type::String) {
-            auto value = get_string(lua, -1);
-            param.strings[i] = std::string(value.data(), value.size());
+            param.strings[i] = get_string(lua, -1);
             param.values[i] = param.strings[i].c_str();
-            param.lengths[i] = value.length();
+            param.lengths[i] = param.strings[i].length();
             param.formats[i] = 1;
         } else if (type == GLua::Type::Number) {
-            param.strings[i] = std::to_string(lua->GetNumber(-1));
+            param.strings[i] = get_string(lua, -1);
             param.values[i] = param.strings[i].c_str();
         } else if (type == GLua::Type::Bool) {
             param.values[i] = lua->GetBool(-1) ? "true" : "false";
