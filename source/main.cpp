@@ -84,7 +84,54 @@ namespace async_postgres::lua {
         }
 
         state->query = std::move(query);
+        return 0;
+    }
 
+    lua_protected_fn(prepare) {
+        lua->CheckType(1, async_postgres::connection_meta);
+        lua->CheckType(2, GLua::Type::String);
+        lua->CheckType(3, GLua::Type::String);
+        lua->CheckType(4, GLua::Type::Function);
+
+        auto state = lua_connection_state();
+        if (state->query) {
+            throw std::runtime_error("query already in progress");
+        }
+
+        async_postgres::CreatePreparedCommand command = {lua->GetString(2),
+                                                         lua->GetString(3)};
+        async_postgres::Query query = {std::move(command)};
+
+        if (lua->IsType(4, GLua::Type::Function)) {
+            query.callback = GLua::AutoReference(lua, 4);
+        }
+
+        state->query = std::move(query);
+        return 0;
+    }
+
+    lua_protected_fn(queryPrepared) {
+        lua->CheckType(1, async_postgres::connection_meta);
+        lua->CheckType(2, GLua::Type::String);
+        lua->CheckType(3, GLua::Type::Table);
+        lua->CheckType(4, GLua::Type::Function);
+
+        auto state = lua_connection_state();
+        if (state->query) {
+            throw std::runtime_error("query already in progress");
+        }
+
+        async_postgres::PreparedCommand command = {
+            lua->GetString(2),
+            async_postgres::array_to_params(lua, 3),
+        };
+        async_postgres::Query query = {std::move(command)};
+
+        if (lua->IsType(4, GLua::Type::Function)) {
+            query.callback = GLua::AutoReference(lua, 4);
+        }
+
+        state->query = std::move(query);
         return 0;
     }
 
@@ -126,6 +173,8 @@ void register_connection_mt(GLua::ILuaInterface* lua) {
     register_lua_fn(__gc);
     register_lua_fn(query);
     register_lua_fn(queryParams);
+    register_lua_fn(prepare);
+    register_lua_fn(queryPrepared);
     register_lua_fn(reset);
     register_lua_fn(setNotifyCallback);
 

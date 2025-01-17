@@ -2,18 +2,28 @@
 
 using namespace async_postgres;
 
+#define get_if_command(type) \
+    const auto* command = std::get_if<type>(&query.command)
+
 // returns true if query was sent
 // returns false on error
 inline bool send_query(PGconn* conn, Query& query) {
-    if (const auto* command = std::get_if<SimpleCommand>(&query.command)) {
+    if (get_if_command(SimpleCommand)) {
         return PQsendQuery(conn, command->command.c_str()) == 1;
-    } else if (const auto* command =
-                   std::get_if<ParameterizedCommand>(&query.command)) {
+    } else if (get_if_command(ParameterizedCommand)) {
         return PQsendQueryParams(conn, command->command.c_str(),
                                  command->param.length(), nullptr,
                                  command->param.values.data(),
                                  command->param.lengths.data(),
                                  command->param.formats.data(), 0) == 1;
+    } else if (get_if_command(CreatePreparedCommand)) {
+        return PQsendPrepare(conn, command->name.c_str(),
+                             command->command.c_str(), 0, nullptr) == 1;
+    } else if (get_if_command(PreparedCommand)) {
+        return PQsendQueryPrepared(
+                   conn, command->name.c_str(), command->param.length(),
+                   command->param.values.data(), command->param.lengths.data(),
+                   command->param.formats.data(), 0) == 1;
     }
     return false;
 }
