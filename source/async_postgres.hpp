@@ -152,4 +152,6 @@ namespace async_postgres {
     // Converts a lua array at given index to a ParamValues
     ParamValues array_to_params(GLua::ILuaInterface* lua, int index);
     SocketStatus check_socket_status(PGconn* conn);
+    bool wait_for_socket(PGconn* conn, bool write = false, bool read = false,
+                         int timeout = -1);
 };  // namespace async_postgres

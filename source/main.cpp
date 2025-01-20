@@ -44,7 +44,6 @@ namespace async_postgres::lua {
     lua_protected_fn(query) {
         lua->CheckType(1, async_postgres::connection_meta);
         lua->CheckType(2, GLua::Type::String);
-        lua->CheckType(3, GLua::Type::Function);
 
         auto state = lua_connection_state();
         if (state->query) {
@@ -66,7 +65,6 @@ namespace async_postgres::lua {
         lua->CheckType(1, async_postgres::connection_meta);
         lua->CheckType(2, GLua::Type::String);
         lua->CheckType(3, GLua::Type::Table);
-        lua->CheckType(4, GLua::Type::Function);
 
         auto state = lua_connection_state();
         if (state->query) {
@@ -91,7 +89,6 @@ namespace async_postgres::lua {
         lua->CheckType(1, async_postgres::connection_meta);
         lua->CheckType(2, GLua::Type::String);
         lua->CheckType(3, GLua::Type::String);
-        lua->CheckType(4, GLua::Type::Function);
 
         auto state = lua_connection_state();
         if (state->query) {
@@ -114,7 +111,6 @@ namespace async_postgres::lua {
         lua->CheckType(1, async_postgres::connection_meta);
         lua->CheckType(2, GLua::Type::String);
         lua->CheckType(3, GLua::Type::Table);
-        lua->CheckType(4, GLua::Type::Function);
 
         auto state = lua_connection_state();
         if (state->query) {
@@ -138,7 +134,6 @@ namespace async_postgres::lua {
     lua_protected_fn(describePrepared) {
         lua->CheckType(1, async_postgres::connection_meta);
         lua->CheckType(2, GLua::Type::String);
-        lua->CheckType(3, GLua::Type::Function);
 
         auto state = lua_connection_state();
         if (state->query) {
@@ -159,7 +154,6 @@ namespace async_postgres::lua {
     lua_protected_fn(describePortal) {
         lua->CheckType(1, async_postgres::connection_meta);
         lua->CheckType(2, GLua::Type::String);
-        lua->CheckType(3, GLua::Type::Function);
 
         auto state = lua_connection_state();
         if (state->query) {
@@ -193,10 +187,11 @@ namespace async_postgres::lua {
 
     lua_protected_fn(setNotifyCallback) {
         lua->CheckType(1, async_postgres::connection_meta);
-        lua->CheckType(2, GLua::Type::Function);
 
         auto state = lua_connection_state();
-        state->on_notify = GLua::AutoReference(lua, 2);
+        if (lua->IsType(2, GLua::Type::Function)) {
+            state->on_notify = GLua::AutoReference(lua, 2);
+        }
 
         return 0;
     }
@@ -205,6 +200,25 @@ namespace async_postgres::lua {
         lua->CheckType(1, async_postgres::connection_meta);
 
         auto state = lua_connection_state();
+        if (state->reset_event) {
+            auto& event = state->reset_event.value();
+            while (state->reset_event.has_value() &&
+                   &event == &state->reset_event.value()) {
+                bool write =
+                    state->reset_event->status == PGRES_POLLING_WRITING;
+                bool read = state->reset_event->status == PGRES_POLLING_READING;
+                if (!write && !read) {
+                    break;
+                }
+
+                wait_for_socket(state->conn.get(), write, read);
+                process_reset(lua, state);
+            }
+
+            lua->PushBool(1);
+            return 1;
+        }
+
         if (state->query) {
             auto& query = state->query.value();
 

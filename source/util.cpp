@@ -96,3 +96,26 @@ SocketStatus async_postgres::check_socket_status(PGconn* conn) {
 
     return status;
 }
+
+bool async_postgres::wait_for_socket(PGconn* conn, bool write, bool read,
+                                     int timeout) {
+    SOCKET fd = PQsocket(conn);
+    if (fd < 0) {
+        return false;
+    }
+
+    short events = 0;
+    if (write) {
+        events |= POLLOUT;
+    }
+    if (read) {
+        events |= POLLIN;
+    }
+
+    pollfd fds[1] = {{fd, events, 0}};
+    if (poll(fds, 1, timeout) < 0) {
+        return false;
+    }
+
+    return true;
+}
