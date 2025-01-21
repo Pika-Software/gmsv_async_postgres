@@ -3,11 +3,11 @@
 using namespace async_postgres;
 
 #define get_if_command(type) \
-    const auto* command = std::get_if<type>(&query.command)
+    const auto* command = std::get_if<type>(&query->command)
 
 // returns true if query was sent
 // returns false on error
-inline bool send_query(PGconn* conn, Query& query) {
+inline bool send_query(PGconn* conn, Query* query) {
     if (get_if_command(SimpleCommand)) {
         return PQsendQuery(conn, command->command.c_str()) == 1;
     } else if (get_if_command(ParameterizedCommand)) {
@@ -39,11 +39,10 @@ void query_failed(GLua::ILuaInterface* lua, Connection* state) {
         return;
     }
 
-    auto query = std::move(*state->query);
+    auto query = state->query;
     state->query.reset();
 
-    if (query.callback) {
-        query.callback.Push();
+    if (query->callback.Push()) {
         lua->PushBool(false);
         lua->PushString(PQerrorMessage(state->conn.get()));
         pcall(lua, 2, 0);
@@ -112,15 +111,15 @@ void query_result(GLua::ILuaInterface* lua, pg::result&& result,
 
 // returns true if poll was successful
 // returns false if there was an error
-inline bool poll_query(PGconn* conn, Query& query) {
+inline bool poll_query(PGconn* conn, Query* query) {
     auto socket = check_socket_status(conn);
     if (socket.read_ready || socket.write_ready) {
         if (socket.read_ready && PQconsumeInput(conn) == 0) {
             return false;
         }
 
-        if (!query.flushed) {
-            query.flushed = PQflush(conn) == 0;
+        if (!query->flushed) {
+            query->flushed = PQflush(conn) == 0;
         }
     }
     return true;
@@ -142,10 +141,10 @@ void async_postgres::process_result(GLua::ILuaInterface* lua, Connection* state,
         auto next_result = pg::getResult(state->conn);
         if (!next_result) {
             // query is done, we need to remove query from the state
-            Query query = std::move(*state->query);
+            auto query = state->query;
             state->query.reset();
 
-            query_result(lua, std::move(result), query.callback);
+            query_result(lua, std::move(result), query->callback);
 
             // callback might added another query, process it rightaway
             process_query(lua, state);
@@ -169,15 +168,15 @@ void async_postgres::process_query(GLua::ILuaInterface* lua,
         return;
     }
 
-    auto& query = state->query.value();
-    if (!query.sent) {
+    auto* query = state->query.get();
+    if (!query->sent) {
         if (!send_query(state->conn.get(), query)) {
             query_failed(lua, state);
             return process_query(lua, state);
         }
 
-        query.sent = true;
-        query.flushed = PQflush(state->conn.get()) == 0;
+        query->sent = true;
+        query->flushed = PQflush(state->conn.get()) == 0;
     }
 
     // if (!poll_query(state->conn.get(), query)) {

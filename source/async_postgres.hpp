@@ -8,7 +8,6 @@
 #include <chrono>
 #include <exception>
 #include <memory>
-#include <optional>
 #include <queue>
 #include <string_view>
 #include <variant>
@@ -99,6 +98,8 @@ namespace async_postgres {
                          CreatePreparedCommand, PreparedCommand,
                          DescribePreparedCommand, DescribePortalCommand>;
 
+        Query(CommandVariant&& command) : command(std::move(command)) {}
+
         CommandVariant command;
         GLua::AutoReference callback;
         bool sent = false;
@@ -112,8 +113,8 @@ namespace async_postgres {
 
     struct Connection {
         pg::conn conn;
-        std::optional<Query> query;
-        std::optional<ResetEvent> reset_event;
+        std::shared_ptr<Query> query;
+        std::shared_ptr<ResetEvent> reset_event;
         GLua::AutoReference on_notify;
 
         Connection(GLua::ILuaInterface* lua, pg::conn&& conn);

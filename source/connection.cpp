@@ -105,7 +105,7 @@ void async_postgres::reset(GLua::ILuaInterface* lua, Connection* state,
             throw std::runtime_error(PQerrorMessage(state->conn.get()));
         }
 
-        state->reset_event = ResetEvent();
+        state->reset_event = std::make_shared<ResetEvent>();
     }
 
     if (callback) {
@@ -119,26 +119,24 @@ void async_postgres::process_reset(GLua::ILuaInterface* lua,
         return;
     }
 
-    auto& event = state->reset_event.value();
+    auto event = state->reset_event;
     if (!socket_is_ready(state->conn.get(), state->reset_event->status)) {
         return;
     }
 
-    event.status = PQresetPoll(state->conn.get());
-    if (event.status == PGRES_POLLING_OK) {
-        auto callbacks = std::move(event.callbacks);
+    event->status = PQresetPoll(state->conn.get());
+    if (event->status == PGRES_POLLING_OK) {
         state->reset_event.reset();
 
-        for (auto& callback : callbacks) {
+        for (auto& callback : event->callbacks) {
             callback.Push();
             lua->PushBool(true);
             pcall(lua, 1, 0);
         }
-    } else if (event.status == PGRES_POLLING_FAILED) {
-        auto callbacks = std::move(event.callbacks);
+    } else if (event->status == PGRES_POLLING_FAILED) {
         state->reset_event.reset();
 
-        for (auto& callback : callbacks) {
+        for (auto& callback : event->callbacks) {
             callback.Push();
             lua->PushBool(false);
             lua->PushString(PQerrorMessage(state->conn.get()));
