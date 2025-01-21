@@ -145,6 +145,7 @@ namespace async_postgres {
 
     // misc.cpp
     void register_misc_connection_functions(GLua::ILuaInterface* lua);
+    void register_enums(GLua::ILuaInterface* lua);
 
     // util.cpp
     std::string_view get_string(GLua::ILuaInterface* lua, int index = -1);

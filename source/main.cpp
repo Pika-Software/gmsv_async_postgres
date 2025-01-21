@@ -249,6 +249,20 @@ namespace async_postgres::lua {
                       state->query);  // busy if reset or query are in progress
         return 1;
     }
+
+    lua_protected_fn(querying) {
+        lua->CheckType(1, async_postgres::connection_meta);
+        auto state = lua_connection_state();
+        lua->PushBool(state->query.has_value());
+        return 1;
+    }
+
+    lua_protected_fn(resetting) {
+        lua->CheckType(1, async_postgres::connection_meta);
+        auto state = lua_connection_state();
+        lua->PushBool(state->reset_event.has_value());
+        return 1;
+    }
 }  // namespace async_postgres::lua
 
 #define register_lua_fn(name)                      \
@@ -272,6 +286,8 @@ void register_connection_mt(GLua::ILuaInterface* lua) {
     register_lua_fn(setNotifyCallback);
     register_lua_fn(wait);
     register_lua_fn(isBusy);
+    register_lua_fn(querying);
+    register_lua_fn(resetting);
 
     async_postgres::register_misc_connection_functions(lua);
 
@@ -282,6 +298,8 @@ void make_global_table(GLua::ILuaInterface* lua) {
     lua->CreateTable();
 
     register_lua_fn(connect);
+
+    async_postgres::register_enums(lua);
 
     lua->SetField(GLua::INDEX_GLOBAL, "async_postgres");
 }

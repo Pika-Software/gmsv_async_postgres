@@ -1,3 +1,5 @@
+
+
 #include "async_postgres.hpp"
 
 using namespace async_postgres;
@@ -194,4 +196,42 @@ void async_postgres::register_misc_connection_functions(
     register_lua_fn(escapeIdentifier);
     register_lua_fn(escapeBytea);
     register_lua_fn(unescapeBytea);
+}
+
+#define enum_value(name) {#name, name}
+
+void async_postgres::register_enums(GLua::ILuaInterface* lua) {
+    using enum_array = std::vector<std::pair<const char*, int>>;
+
+    std::vector<enum_array> enums = {
+        {
+            enum_value(CONNECTION_OK),
+            enum_value(CONNECTION_BAD),
+        },
+        {
+            enum_value(PQTRANS_IDLE),
+            enum_value(PQTRANS_ACTIVE),
+            enum_value(PQTRANS_INTRANS),
+            enum_value(PQTRANS_INERROR),
+            enum_value(PQTRANS_UNKNOWN),
+        },
+        {
+            enum_value(PQERRORS_TERSE),
+            enum_value(PQERRORS_DEFAULT),
+            enum_value(PQERRORS_VERBOSE),
+            enum_value(PQERRORS_SQLSTATE),
+        },
+        {
+            enum_value(PQSHOW_CONTEXT_NEVER),
+            enum_value(PQSHOW_CONTEXT_ERRORS),
+            enum_value(PQSHOW_CONTEXT_ALWAYS),
+        },
+    };
+
+    for (const auto& e : enums) {
+        for (const auto& [name, value] : e) {
+            lua->PushNumber(value);
+            lua->SetField(-2, name);
+        }
+    }
 }
