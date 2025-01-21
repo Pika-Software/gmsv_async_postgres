@@ -61,18 +61,52 @@ inline bool bad_result(PGresult* result) {
            status == PGRES_FATAL_ERROR;
 }
 
+#define set_error_field(name, field)                                 \
+    {                                                                \
+        const char* field_value = PQresultErrorField(result, field); \
+        if (field_value) {                                           \
+            lua->PushString(field_value);                            \
+            lua->SetField(-2, name);                                 \
+        }                                                            \
+    }
+
+inline void create_result_error_table(GLua::ILuaInterface* lua,
+                                      PGresult* result) {
+    lua->CreateTable();
+
+    lua->PushString(PQresStatus(PQresultStatus(result)));
+    lua->SetField(-2, "status");
+
+    set_error_field("severity", PG_DIAG_SEVERITY_NONLOCALIZED);
+    set_error_field("sqlState", PG_DIAG_SQLSTATE);
+    set_error_field("messagePrimary", PG_DIAG_MESSAGE_PRIMARY);
+    set_error_field("messageDetail", PG_DIAG_MESSAGE_DETAIL);
+    set_error_field("messageHint", PG_DIAG_MESSAGE_HINT);
+    set_error_field("statementPosition", PG_DIAG_STATEMENT_POSITION);
+    set_error_field("context", PG_DIAG_CONTEXT);
+    set_error_field("schemaName", PG_DIAG_SCHEMA_NAME);
+    set_error_field("tableName", PG_DIAG_TABLE_NAME);
+    set_error_field("columnName", PG_DIAG_COLUMN_NAME);
+    set_error_field("dataType", PG_DIAG_DATATYPE_NAME);
+    set_error_field("constraintName", PG_DIAG_CONSTRAINT_NAME);
+    set_error_field("sourceFile", PG_DIAG_SOURCE_FILE);
+    set_error_field("sourceLine", PG_DIAG_SOURCE_LINE);
+    set_error_field("sourceFunction", PG_DIAG_SOURCE_FUNCTION);
+}
+
 void query_result(GLua::ILuaInterface* lua, pg::result&& result,
                   GLua::AutoReference& callback) {
     if (callback.Push()) {
         if (!bad_result(result.get())) {
             lua->PushBool(true);
             create_result_table(lua, result.get());
+            pcall(lua, 2, 0);
         } else {
             lua->PushBool(false);
             lua->PushString(PQresultErrorMessage(result.get()));
+            create_result_error_table(lua, result.get());
+            pcall(lua, 3, 0);
         }
-
-        pcall(lua, 2, 0);
     }
 }
 
