@@ -23,6 +23,9 @@ target_include_directories(async_postgres PRIVATE
 
 set_gmod_suffix_prefix(async_postgres)
 
+# Set version
+add_definitions(-DASYNC_POSTGRES_VERSION="${CMAKE_PROJECT_VERSION}" -DASYNC_POSTGRES_BRANCH="${GIT_BRANCH}")
+
 # Autoinstall
 set(AUTOINSTALL "" CACHE PATH "Autoinstall path")
 if(IS_DIRECTORY ${AUTOINSTALL})

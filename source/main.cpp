@@ -301,6 +301,21 @@ void make_global_table(GLua::ILuaInterface* lua) {
 
     async_postgres::register_enums(lua);
 
+    lua->PushNumber(LUA_API_VERSION);
+    lua->SetField(-2, "LUA_API_VERSION");
+
+    lua->PushNumber(PQlibVersion());
+    lua->SetField(-2, "PQ_VERSION");
+
+    lua->PushString(ASYNC_POSTGRES_VERSION);
+    lua->SetField(-2, "VERSION");
+
+    lua->PushString(ASYNC_POSTGRES_BRANCH);
+    lua->SetField(-2, "BRANCH");
+
+    lua->PushString("https://github.com/Pika-Software/gmsv_async_postgres");
+    lua->SetField(-2, "URL");
+
     lua->SetField(GLua::INDEX_GLOBAL, "async_postgres");
 }
 

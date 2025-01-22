@@ -15,6 +15,8 @@
 
 #include "safe_pg.hpp"
 
+#define LUA_API_VERSION 1
+
 namespace GLua = GarrysMod::Lua;
 
 #define lua_interface()                                 \

@@ -33,8 +33,9 @@ if(NOT DEFINED GIT_BRANCH)
     )
 endif()
 
+file(STRINGS "VERSION" ASYNC_POSTGRES_VERSION)
 project(gmsv_async_postgres 
-    VERSION 1.0.0
+    VERSION ${ASYNC_POSTGRES_VERSION}
     LANGUAGES C CXX
     HOMEPAGE_URL "https://github.com/Pika-Software/gmsv_async_postgres"
 )
