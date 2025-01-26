@@ -19,3 +19,9 @@ if async_postgres.LUA_API_VERSION ~= 1 then
     error("async_postgres module has different Lua API version, " ..
         "expected 1, got " .. async_postgres.LUA_API_VERSION)
 end
+
+---@class PGClient
+local Client = {}
+
+---@private
+Client.__index = Client
