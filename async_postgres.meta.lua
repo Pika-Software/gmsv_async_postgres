@@ -30,8 +30,9 @@ async_postgres.PQSHOW_CONTEXT_ALWAYS = 2
 --- Creates connection to a PostgreSQL database with given connection string
 --- see https://www.postgresql.org/docs/16/libpq-connect.html#LIBPQ-CONNSTRING
 ---@param url string
+---@param callback fun(ok: boolean, conn: PGconn|string)
 ---@return PGconn
-function async_postgres.connect(url)
+function async_postgres.connect(url, callback)
 end
 
 ---@class PGconn : userdata
@@ -55,6 +56,7 @@ end
 function PGconn:describePortal(name, callback)
 end
 
+---@param callback fun(ok: boolean, err: string?)
 function PGconn:reset(callback)
 end
 
@@ -82,6 +84,7 @@ end
 function PGconn:port()
 end
 
+---@return `async_postgres.CONNECTION_OK` | `async_postgres.CONNECTION_BAD`
 function PGconn:status()
 end
 
