@@ -46,6 +46,8 @@
 ---@field querying          fun(self: PGconn): boolean
 ---@field resetting         fun(self: PGconn): boolean
 ---@field db                fun(self: PGconn): string
+---@field user              fun(self: PGconn): string
+---@field pass              fun(self: PGconn): string
 ---@field host              fun(self: PGconn): string
 ---@field hostaddr          fun(self: PGconn): string
 ---@field port              fun(self: PGconn): number
@@ -65,6 +67,7 @@
 ---@field escapeIdentifier  fun(self: PGconn, str: string): string
 ---@field escapeBytea       fun(self: PGconn, str: string): string
 ---@field unescapeBytea     fun(self: PGconn, str: string): string
+---@field setNotifyCallback fun(self: PGconn, callback: fun(channel: string, payload: string, backendPID: number))
 
 ---@class PGResult
 ---@field fields { name: string, type: number }[] list of fields in the result
@@ -140,6 +143,7 @@ end
 ---@field private retryAttempted number number of attempts to reconnect to the database
 ---@field private conn PGconn native connection object (do not use it directly, otherwise be careful not to store it anywhere else, otherwise closing connection will be impossible)
 ---@field private queries { push: fun(self, q: PGQuery), prepend: fun(self, q: PGQuery), pop: (fun(self): PGQuery), size: fun(self): number } list of queries
+---@field private notifyCallback function? callback for NOTIFY messages
 local Client = {}
 
 ---@private
@@ -157,10 +161,6 @@ end
 function Client:reset(callback)
     if self.closed then
         error("client was closed")
-    end
-
-    if self.connecting then
-        error("already connecting to the database")
     end
 
     if not self.conn then
@@ -206,6 +206,7 @@ function Client:connect(callback)
         if ok then
             ---@cast conn PGconn
             self.conn = conn
+            pcall(self.conn.setNotifyCallback, self.conn, self.notifyCallback)
             xpcall(callback, ErrorNoHaltWithStack, ok)
             self:processQueue()
         else
@@ -245,7 +246,7 @@ function Client:tryReconnect()
     if self.retryAttempted < self.maxRetries and not self.closed then
         self.retryAttempted = self.retryAttempted + 1
         self:reset(function(ok)
-            if not ok then
+            if not ok and not self:connected() then
                 timer.Simple(5, function()
                     self:tryReconnect()
                 end)
@@ -307,7 +308,7 @@ end
 --- It's recommended to use queryParams to prevent sql injections if you are going to pass parameters to a query.
 ---
 --- https://www.postgresql.org/docs/16/libpq-exec.html#LIBPQ-PQEXEC
----@see PGClient.queryParams
+---@see PGClient.queryParams to send a query with parameters
 ---@param query string
 ---@param callback PGQueryCallback
 function Client:query(query, callback)
@@ -341,7 +342,7 @@ end
 --- If prepared statement with existing name exists, error will be thrown
 ---
 --- https://www.postgresql.org/docs/16/libpq-exec.html#LIBPQ-PQPREPARE
----@see PGClient.queryPrepared
+---@see PGClient.queryPrepared to use a prepared statement
 ---@param name string
 ---@param query string
 ---@param callback PGQueryCallback
@@ -358,7 +359,7 @@ end
 --- Sends a request to execute prepared statement
 ---
 --- https://www.postgresql.org/docs/16/libpq-exec.html#LIBPQ-PQEXECPREPARED
----@see PGClient.prepare
+---@see PGClient.prepare to prepare a statement
 ---@param name string
 ---@param params PGAllowedParam[]
 ---@param callback PGQueryCallback
@@ -436,6 +437,171 @@ function Client:close(wait)
     self.conn = nil
     self.closed = true
     collectgarbage() -- collect PGconn so it will be closed
+end
+
+--- Returns number of queued queries (does not includes currently executing query)
+---@see PGClient.isBusy to check if any query currently executing
+---@return number
+function Client:pendingQueries()
+    return self.queries:size()
+end
+
+--- Sets a callback for NOTIFY messages
+---@param callback fun(channel: string, payload: string, backendPID: number)
+function Client:setNotifyCallback(callback)
+    self.notifyCallback = callback
+    if self.conn then
+        self.conn:setNotifyCallback(callback)
+    end
+end
+
+--- Returns the database name of the connection.
+---@return string
+function Client:db()
+    return self.conn and self.conn:db() or "unknown"
+end
+
+--- Returns the user name of the connection.
+---@return string
+function Client:user()
+    return self.conn and self.conn:user() or "unknown"
+end
+
+--- Returns the password of the connection.
+---@return string
+function Client:pass()
+    return self.conn and self.conn:pass() or "unknown"
+end
+
+--- Returns the host name of the connection.
+---@return string
+function Client:host()
+    return self.conn and self.conn:host() or "unknown"
+end
+
+--- Returns the server IP address of the active connection.
+---@return string
+function Client:hostaddr()
+    return self.conn and self.conn:hostaddr() or "unknown"
+end
+
+--- Returns the port of the active connection.
+---@return number
+function Client:port()
+    return self.conn and self.conn:port() or 0
+end
+
+--- Returns the current in-transaction status of the server.
+---@return PGTransStatus
+function Client:transactionStatus()
+    return self.conn and self.conn:transactionStatus() or async_postgres.PQTRANS_UNKNOWN
+end
+
+--- Looks up a current parameter setting of the server.
+---
+--- https://www.postgresql.org/docs/16/libpq-status.html#LIBPQ-PQPARAMETERSTATUS
+---@param paramName string
+---@return string
+function Client:parameterStatus(paramName)
+    return self.conn and self.conn:parameterStatus(paramName) or "unknown"
+end
+
+--- Interrogates the frontend/backend protocol being used.
+---@return number
+function Client:protocolVersion()
+    return self.conn and self.conn:protocolVersion() or 0
+end
+
+--- Returns an integer representing the server version.
+---@return number
+function Client:serverVersion()
+    return self.conn and self.conn:serverVersion() or 0
+end
+
+--- Returns the error message most recently generated by an operation on the connection.
+---@return string
+function Client:errorMessage()
+    return self.conn and self.conn:errorMessage() or "unknown"
+end
+
+--- Returns the process ID (PID) of the backend process handling this connection.
+---@return number
+function Client:backendPID()
+    return self.conn and self.conn:backendPID() or 0
+end
+
+--- Returns true if the connection uses SSL, false if not.
+---@return boolean
+function Client:sslInUse()
+    return self.conn and self.conn:sslInUse() or false
+end
+
+--- Returns SSL-related information about the connection.
+---
+--- https://www.postgresql.org/docs/16/libpq-status.html#LIBPQ-PQSSLATTRIBUTE
+---@param name string
+---@return string
+function Client:sslAttribute(name)
+    return self.conn and self.conn:sslAttribute(name) or "unknown"
+end
+
+--- Prepares the encrypted form of a PostgreSQL password.
+---
+--- https://www.postgresql.org/docs/16/libpq-misc.html#LIBPQ-PQENCRYPTPASSWORDCONN
+---@param user string
+---@param password string
+---@param algorithm string
+---@return string
+function Client:encryptPassword(user, password, algorithm)
+    if not self.conn then
+        error("client was not connected to the database, please use :connect() first")
+    end
+    return self.conn:encryptPassword(user, password, algorithm)
+end
+
+--- Escapes a string for use within an SQL command.
+---
+--- https://www.postgresql.org/docs/16/libpq-exec.html#LIBPQ-PQESCAPELITERAL
+---@see PGClient.queryParams does not needs to escape parameters
+---@return string
+function Client:escape(str)
+    if not self.conn then
+        error("client was not connected to the database, please use :connect() first")
+    end
+    return self.conn:escape(str)
+end
+
+--- Escapes a string for use as an SQL identifier, such as a table, column, or function name
+---
+--- https://www.postgresql.org/docs/16/libpq-exec.html#LIBPQ-PQESCAPEIDENTIFIER
+---@return string
+function Client:escapeIdentifier(str)
+    if not self.conn then
+        error("client was not connected to the database, please use :connect() first")
+    end
+    return self.conn:escapeIdentifier(str)
+end
+
+--- Escapes binary data for use within an SQL command with the type `bytea`.
+---
+--- https://www.postgresql.org/docs/16/libpq-exec.html#LIBPQ-PQESCAPEBYTEACONN
+---@return string
+function Client:escapeBytea(str)
+    if not self.conn then
+        error("client was not connected to the database, please use :connect() first")
+    end
+    return self.conn:escapeBytea(str)
+end
+
+--- Converts a string representation of binary data into binary data — the reverse of `Client:escapeBytea(str)`.
+---
+--- https://www.postgresql.org/docs/16/libpq-exec.html#LIBPQ-PQUNESCAPEBYTEA
+---@return string
+function Client:unescapeBytea(str)
+    if not self.conn then
+        error("client was not connected to the database, please use :connect() first")
+    end
+    return self.conn:unescapeBytea(str)
 end
 
 --- Creates a new client with given connection url
