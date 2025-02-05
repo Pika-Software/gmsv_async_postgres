@@ -127,7 +127,8 @@ end
 
 ---@class PGQuery
 ---@field command 'query' | 'queryParams' | 'prepare' | 'queryPrepared' | 'describePrepared' | 'describePortal'
----@field query string
+---@field name string?
+---@field query string?
 ---@field params table?
 ---@field callback PGQueryCallback
 
@@ -257,9 +258,8 @@ function Client:tryReconnect()
 end
 
 ---@private
----@param conn PGconn
 ---@param query PGQuery
-function Client:runQuery(conn, query)
+function Client:runQuery(query)
     local function callback(ok, result, errdata)
         -- if connection was lost, put query back into the queue (it was popped before)
         -- and try to reconnect
@@ -274,7 +274,17 @@ function Client:runQuery(conn, query)
     end
 
     if query.command == "query" then
-        conn:query(query.query, callback)
+        self.conn:query(query.query, callback)
+    elseif query.command == "queryParams" then
+        self.conn:queryParams(query.query, query.params, callback)
+    elseif query.command == "prepare" then
+        self.conn:prepare(query.name, query.query, callback)
+    elseif query.command == "queryPrepared" then
+        self.conn:queryPrepared(query.name, query.params, callback)
+    elseif query.command == "describePrepared" then
+        self.conn:describePrepared(query.name, callback)
+    elseif query.command == "describePortal" then
+        self.conn:describePortal(query.name, callback)
     end
 end
 
@@ -286,25 +296,105 @@ function Client:processQueue()
     end
 
     local query = self.queries:pop()
-    local ok, err = pcall(self.runQuery, self, self.conn, query)
+    local ok, err = pcall(self.runQuery, self, query)
     if not ok then
         xpcall(query.callback, ErrorNoHaltWithStack, false, err)
     end
 end
 
---- Makes a simple query to the database
+--- Sends a query to the server
 ---
 --- It's recommended to use queryParams to prevent sql injections if you are going to pass parameters to a query.
+---
+--- https://www.postgresql.org/docs/16/libpq-exec.html#LIBPQ-PQEXEC
+---@see PGClient.queryParams
 ---@param query string
 ---@param callback PGQueryCallback
 function Client:query(query, callback)
-    if not self:connected() and not self.connecting then
-        error("client is not connected to the database, use :connect(...) to connect")
-    end
-
     self.queries:push({
         command = "query",
         query = query,
+        callback = callback,
+    })
+    self:processQueue()
+end
+
+--- Sends a query with given parameters to the server
+---
+--- https://www.postgresql.org/docs/16/libpq-exec.html#LIBPQ-PQEXECPARAMS
+---@param query string
+---@param params PGAllowedParam[]
+---@param callback PGQueryCallback
+function Client:queryParams(query, params, callback)
+    self.queries:push({
+        command = "queryParams",
+        query = query,
+        params = params,
+        callback = callback,
+    })
+    self:processQueue()
+end
+
+--- Sends a request to create prepared statement,
+--- unnamed prepared statement will replace any existing unnamed prepared statement
+---
+--- If prepared statement with existing name exists, error will be thrown
+---
+--- https://www.postgresql.org/docs/16/libpq-exec.html#LIBPQ-PQPREPARE
+---@see PGClient.queryPrepared
+---@param name string
+---@param query string
+---@param callback PGQueryCallback
+function Client:prepare(name, query, callback)
+    self.queries:push({
+        command = "prepare",
+        name = name,
+        query = query,
+        callback = callback,
+    })
+    self:processQueue()
+end
+
+--- Sends a request to execute prepared statement
+---
+--- https://www.postgresql.org/docs/16/libpq-exec.html#LIBPQ-PQEXECPREPARED
+---@see PGClient.prepare
+---@param name string
+---@param params PGAllowedParam[]
+---@param callback PGQueryCallback
+function Client:queryPrepared(name, params, callback)
+    self.queries:push({
+        command = "queryPrepared",
+        name = name,
+        params = params,
+        callback = callback,
+    })
+    self:processQueue()
+end
+
+--- Sends a request to describe prepared statement
+---
+--- https://www.postgresql.org/docs/16/libpq-exec.html#LIBPQ-PQDESCRIBEPREPARED
+---@param name string
+---@param callback PGQueryCallback
+function Client:describePrepared(name, callback)
+    self.queries:push({
+        command = "describePrepared",
+        name = name,
+        callback = callback,
+    })
+    self:processQueue()
+end
+
+--- Sends a request to describe portal
+---
+--- https://www.postgresql.org/docs/16/libpq-exec.html#LIBPQ-PQDESCRIBEPORTAL
+---@param name string
+---@param callback PGQueryCallback
+function Client:describePortal(name, callback)
+    self.queries:push({
+        command = "describePortal",
+        name = name,
         callback = callback,
     })
     self:processQueue()
