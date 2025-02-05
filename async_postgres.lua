@@ -171,6 +171,11 @@ local Client = {}
 ---@private
 Client.__index = Client
 
+---@private
+function Client:__tostring()
+    return string.format("PGClient<%s@%s:%d/%s (%s)>",
+        self:user(), self:host(), self:port(), self:db(), self:connected() and "connected" or "disconnected")
+end
 
 --- Checks if client is connected to the database
 ---@return boolean
