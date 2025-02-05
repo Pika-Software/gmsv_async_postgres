@@ -34,37 +34,37 @@
 ---@alias PGShowContext `async_postgres.PQSHOW_CONTEXT_NEVER` | `async_postgres.PQSHOW_CONTEXT_ERRORS` | `async_postgres.PQSHOW_CONTEXT_ALWAYS`
 
 ---@class PGconn
----@field query fun(query: string, callback: PGQueryCallback)
----@field queryParams fun(query: string, params: PGAllowedParam[], callback: PGQueryCallback)
----@field prepare fun(name: string, query: string, callback: PGQueryCallback)
----@field queryPrepared fun(name: string, params: PGAllowedParam[], callback: PGQueryCallback)
----@field describePrepared fun(name: string, callback: PGQueryCallback)
----@field describePortal fun(name: string, callback: PGQueryCallback)
----@field reset fun(callback: fun(ok: boolean, err: string?))
----@field wait fun()
----@field isBusy fun(): boolean
----@field querying fun(): boolean
----@field resetting fun(): boolean
----@field db fun(): string
----@field host fun(): string
----@field hostaddr fun(): string
----@field port fun(): number
----@field status fun(): PGConnStatus
----@field transactionStatus fun(): PGTransStatus
----@field parameterStatus fun(param: string): string
----@field protocolVersion fun(): number
----@field serverVersion fun(): number
----@field errorMessage fun(): string
----@field backendPID fun(): number
----@field sslInUse fun(): boolean
----@field sslAttribute fun(name: string): string
----@field clientEncoding fun(): string
----@field setClientEncoding fun(encoding: string)
----@field encryptPassword fun(user: string, password: string, algorithm: string): string
----@field escape fun(str: string): string
----@field escapeIdentifier fun(str: string): string
----@field escapeBytea fun(str: string): string
----@field unescapeBytea fun(str: string): string
+---@field query             fun(self: PGconn, query: string, callback: PGQueryCallback)
+---@field queryParams       fun(self: PGconn, query: string, params: PGAllowedParam[], callback: PGQueryCallback)
+---@field prepare           fun(self: PGconn, name: string, query: string, callback: PGQueryCallback)
+---@field queryPrepared     fun(self: PGconn, name: string, params: PGAllowedParam[], callback: PGQueryCallback)
+---@field describePrepared  fun(self: PGconn, name: string, callback: PGQueryCallback)
+---@field describePortal    fun(self: PGconn, name: string, callback: PGQueryCallback)
+---@field reset             fun(self: PGconn, callback: fun(ok: boolean, err: string))
+---@field wait              fun(self: PGconn): boolean
+---@field isBusy            fun(self: PGconn): boolean
+---@field querying          fun(self: PGconn): boolean
+---@field resetting         fun(self: PGconn): boolean
+---@field db                fun(self: PGconn): string
+---@field host              fun(self: PGconn): string
+---@field hostaddr          fun(self: PGconn): string
+---@field port              fun(self: PGconn): number
+---@field status            fun(self: PGconn): PGConnStatus
+---@field transactionStatus fun(self: PGconn): PGTransStatus
+---@field parameterStatus   fun(self: PGconn, param: string): string
+---@field protocolVersion   fun(self: PGconn): number
+---@field serverVersion     fun(self: PGconn): number
+---@field errorMessage      fun(self: PGconn): string
+---@field backendPID        fun(self: PGconn): number
+---@field sslInUse          fun(self: PGconn): boolean
+---@field sslAttribute      fun(self: PGconn, name: string): string
+---@field clientEncoding    fun(self: PGconn): string
+---@field setClientEncoding fun(self: PGconn, encoding: string)
+---@field encryptPassword   fun(self: PGconn, user: string, password: string, algorithm: string): string
+---@field escape            fun(self: PGconn, str: string): string
+---@field escapeIdentifier  fun(self: PGconn, str: string): string
+---@field escapeBytea       fun(self: PGconn, str: string): string
+---@field unescapeBytea     fun(self: PGconn, str: string): string
 
 ---@class PGResult
 ---@field fields { name: string, type: number }[] list of fields in the result
@@ -91,10 +91,54 @@ if async_postgres.LUA_API_VERSION ~= 1 then
         "expected 1, got " .. async_postgres.LUA_API_VERSION)
 end
 
+local Queue = {}
+Queue.__index = Queue
+
+function Queue:prepend(obj)
+    self[self.head] = obj
+    self.head = self.head - 1
+end
+
+function Queue:push(obj)
+    self.tail = self.tail + 1
+    self[self.tail] = obj
+end
+
+function Queue:pop()
+    if self.head ~= self.tail then
+        self.head = self.head + 1
+        local obj = self[self.head]
+        self[self.head] = nil
+        if self.head == self.tail then
+            self.head = 0
+            self.tail = 0
+        end
+        return obj
+    end
+end
+
+function Queue:size()
+    return self.tail - self.head
+end
+
+function Queue.new()
+    return setmetatable({ head = 0, tail = 0 }, Queue)
+end
+
+---@class PGQuery
+---@field command 'query' | 'queryParams' | 'prepare' | 'queryPrepared' | 'describePrepared' | 'describePortal'
+---@field query string
+---@field params table?
+---@field callback PGQueryCallback
+
 ---@class PGClient
 ---@field url string **readonly** connection url
 ---@field connecting boolean **readonly** is client connecting to the database
----@field private conn PGconn native connection object
+---@field closed boolean **readonly** is client closed (to change it to true use `:close()`)
+---@field maxRetries number maximum number of retries to reconnect to the database if connection was lost (set to 0 to disable)
+---@field private retryAttempted number number of attempts to reconnect to the database
+---@field private conn PGconn native connection object (do not use it directly, otherwise be careful not to store it anywhere else, otherwise closing connection will be impossible)
+---@field private queries { push: fun(self, q: PGQuery), prepend: fun(self, q: PGQuery), pop: (fun(self): PGQuery), size: fun(self): number } list of queries
 local Client = {}
 
 ---@private
@@ -110,6 +154,10 @@ end
 --- Reconnects to the database
 ---@param callback fun(ok: boolean, err: string?) callback function
 function Client:reset(callback)
+    if self.closed then
+        error("client was closed")
+    end
+
     if self.connecting then
         error("already connecting to the database")
     end
@@ -120,7 +168,12 @@ function Client:reset(callback)
 
     self.conn:reset(function(ok, err)
         self.connecting = false
-        callback(ok, err)
+        if ok then
+            self.retryAttempted = 0
+        end
+
+        xpcall(callback, ErrorNoHaltWithStack, ok, err)
+        self:processQueue()
     end)
 
     self.connecting = true
@@ -130,6 +183,10 @@ end
 --- If connection was already made, will reconnect to the databse.
 ---@param callback fun(ok: boolean, err: string?) callback function
 function Client:connect(callback)
+    if self.closed then
+        error("client was closed")
+    end
+
     if self.connecting then
         error("already connecting to the database")
     end
@@ -148,7 +205,8 @@ function Client:connect(callback)
         if ok then
             ---@cast conn PGconn
             self.conn = conn
-            callback(ok)
+            xpcall(callback, ErrorNoHaltWithStack, ok)
+            self:processQueue()
         else
             ---@cast conn string
             callback(ok, conn)
@@ -159,6 +217,135 @@ function Client:connect(callback)
     if not finished then
         self.connecting = true
     end
+end
+
+--- Returns if client is processing a query or is resetting the connection
+function Client:isBusy()
+    return self.conn:isBusy()
+end
+
+--- Waits for current query (or reset) to finish
+--- and returns true if waited, false if nothing to wait
+---@return boolean
+function Client:wait()
+    if not self.conn then
+        return false
+    end
+
+    return self.conn:wait()
+end
+
+--- Tries to reconnect to the database,
+--- if maximum number will be reached, we will stop trying to reconnect
+---
+--- WARNING! If number of attempts is exceeded, first query will be failed
+---@private
+function Client:tryReconnect()
+    if self.retryAttempted < self.maxRetries and not self.closed then
+        self.retryAttempted = self.retryAttempted + 1
+        self:reset(function(ok)
+            if not ok then
+                timer.Simple(5, function()
+                    self:tryReconnect()
+                end)
+            end
+        end)
+    else
+        local query = self.queries:pop()
+        query.callback(false, "connection to the databse was lost, maximum number of retries exceeded")
+    end
+end
+
+---@private
+---@param conn PGconn
+---@param query PGQuery
+function Client:runQuery(conn, query)
+    local function callback(ok, result, errdata)
+        -- if connection was lost, put query back into the queue (it was popped before)
+        -- and try to reconnect
+        if not ok and not self:connected() and self.retryAttempted < self.maxRetries then
+            self.queries:prepend(query)
+            self:tryReconnect()
+            return
+        end
+
+        xpcall(query.callback, ErrorNoHaltWithStack, ok, result, errdata)
+        self:processQueue()
+    end
+
+    if query.command == "query" then
+        conn:query(query.query, callback)
+    end
+end
+
+--- Processes queries in the queue
+---@private
+function Client:processQueue()
+    if not self:connected() or self:isBusy() or self.queries:size() == 0 then
+        return
+    end
+
+    local query = self.queries:pop()
+    local ok, err = pcall(self.runQuery, self, self.conn, query)
+    if not ok then
+        xpcall(query.callback, ErrorNoHaltWithStack, false, err)
+    end
+end
+
+--- Makes a simple query to the database
+---
+--- It's recommended to use queryParams to prevent sql injections if you are going to pass parameters to a query.
+---@param query string
+---@param callback PGQueryCallback
+function Client:query(query, callback)
+    if not self:connected() and not self.connecting then
+        error("client is not connected to the database, use :connect(...) to connect")
+    end
+
+    self.queries:push({
+        command = "query",
+        query = query,
+        callback = callback,
+    })
+    self:processQueue()
+end
+
+--- Closes current connection to the databse
+--- and clears all queries in the queue
+---
+--- If `wait = true`, will wait until all queries are processed
+---
+--- P.S. You can change `client.closed` variable to false, and reuse the client
+---@param wait boolean?
+function Client:close(wait)
+    if wait then
+        local iterations = 0
+        while self:wait() do
+            iterations = iterations + 1
+            if iterations > 1000 then
+                ErrorNoHaltWithStack(
+                    "PGClient:close() - waiting for queries too long, closing forcefully")
+                break
+            end
+        end
+    end
+
+    local iterations = 0
+    while self.queries:size() ~= 0 do
+        local q = self.queries:pop()
+        xpcall(q.callback, ErrorNoHaltWithStack, false, "connection to the database was closed")
+
+        iterations = iterations + 1
+        if iterations > 1000 then
+            ErrorNoHaltWithStack("PGClient:close() - queries are infinite, ignoring them")
+            break
+        end
+    end
+
+    self.queries = Queue.new()
+    self.conn = nil
+    self.closed = true
+    collectgarbage() -- collect PGconn so it will be closed
 end
 
 --- Creates a new client with given connection url
@@ -178,10 +365,11 @@ end
 ---@param url string connection url, see libpq documentation for more information
 ---@return PGClient
 function async_postgres.Client(url)
-    local client = setmetatable({}, Client)
-
-    client.url = url
-    client.connecting = false
-
-    return client
+    return setmetatable({
+        url = url,
+        connecting = false,
+        queries = Queue.new(),
+        maxRetries = math.huge,
+        retryAttempted = 0,
+    }, Client)
 end
