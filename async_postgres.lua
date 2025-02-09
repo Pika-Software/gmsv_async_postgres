@@ -166,6 +166,8 @@ end
 ---@field private conn PGconn native connection object (do not use it directly, otherwise be careful not to store it anywhere else, otherwise closing connection will be impossible)
 ---@field private queries { push: fun(self, q: PGQuery), prepend: fun(self, q: PGQuery), pop: (fun(self): PGQuery), size: fun(self): number } list of queries
 ---@field private notifyCallback function? callback for NOTIFY messages
+---@field package acquired boolean
+---@field package pool PGPool?
 local Client = {}
 
 ---@private
@@ -226,7 +228,7 @@ function Client:connect(callback)
     end
 
     local finished = false
-    async_postgres.connect(self.url, function(ok, conn)
+    local ok, err = pcall(async_postgres.connect, self.url, function(ok, conn)
         finished = true
         self.connecting = false
 
@@ -241,6 +243,12 @@ function Client:connect(callback)
             callback(ok, conn)
         end
     end)
+
+    -- async_postgres.connect() can throw error if for example url is invalid
+    if not ok then
+        xpcall(callback, ErrorNoHaltWithStack, false, err)
+        return
+    end
 
     -- if somehow connect(...) already called callback, do not set connecting state
     if not finished then
@@ -631,6 +639,24 @@ function Client:unescapeBytea(str)
     return self.conn:unescapeBytea(str)
 end
 
+--- Releases client back to the pool, only use after getting it from the pool
+---@see PGPool.connect to acquire a client from the pool
+function Client:release()
+    if self.acquired == false then
+        error("client was not acquired, :release() was called multiple times or misused")
+    end
+    if not self.pool then
+        error("client is not in the pool, :release() is misused")
+    end
+
+    local pool = self.pool
+    self.acquired = false
+    self.pool = nil
+
+    ---@cast pool PGPool
+    pool:processQueue() -- after client was release, we need to process pool queue
+end
+
 --- Creates a new client with given connection url
 --- ```lua
 --- local client = async_postgres.Client("postgresql://user:password@localhost:5432/database")
@@ -655,4 +681,336 @@ function async_postgres.Client(url)
         maxRetries = math.huge,
         retryAttempted = 0,
     }, Client)
+end
+
+---@class PGTransactionContext
+---@field client PGClient
+local TransactionContext = {}
+
+---@private
+TransactionContext.__index = TransactionContext
+
+---@async
+---@param fn fun(callback: function)
+---@return PGResult
+local function async(fn)
+    local co = coroutine.running()
+    assert(co, "async function must be called inside coroutine")
+    local ok, res
+    fn(function(_ok, _res)
+        if ok == nil then
+            ok, res = _ok, _res
+            coroutine.resume(co)
+        end
+    end)
+    if ok == nil then
+        coroutine.yield()
+    end
+    if not ok then
+        error(res)
+    end
+    return res
+end
+
+--- Sends a query to the server
+---@see PGClient.query
+---@async
+---@param query string
+function TransactionContext:query(query)
+    return async(function(callback)
+        self.client:query(query, callback)
+    end)
+end
+
+--- Sends a query with given parameters to the server
+---@see PGClient.queryParams
+---@async
+---@param query string
+---@param params PGAllowedParam[]
+function TransactionContext:queryParams(query, params)
+    return async(function(callback)
+        self.client:queryParams(query, params, callback)
+    end)
+end
+
+--- Sends a request to create prepared statement
+---@see PGClient.prepare
+---@async
+---@param name string
+---@param query string
+function TransactionContext:prepare(name, query)
+    return async(function(callback)
+        self.client:prepare(name, query, callback)
+    end)
+end
+
+--- Sends a request to execute prepared statement
+---@see PGClient.queryPrepared
+---@async
+---@param name string
+---@param params PGAllowedParam[]
+function TransactionContext:queryPrepared(name, params)
+    return async(function(callback)
+        self.client:queryPrepared(name, params, callback)
+    end)
+end
+
+--- Sends a request to describe prepared statement
+---@see PGClient.describePrepared
+---@async
+---@param name string
+function TransactionContext:describePrepared(name)
+    return async(function(callback)
+        self.client:describePrepared(name, callback)
+    end)
+end
+
+--- Sends a request to describe portal
+---@see PGClient.describePortal
+---@async
+---@param name string
+function TransactionContext:describePortal(name)
+    return async(function(callback)
+        self.client:describePortal(name, callback)
+    end)
+end
+
+---@package
+---@param client PGClient
+---@return PGTransactionContext
+function TransactionContext.new(client)
+    return setmetatable({
+        client = client,
+    }, TransactionContext)
+end
+
+---@class PGPool
+---@field url string **readonly** connection url
+---@field max number maximum number of clients in the pool (default: 10)
+---@field private clients PGClient[]
+---@field private queue { push: fun(self, f: function), prepend: fun(self, f: function), pop: (fun(self): function), size: fun(self): number }
+local Pool = {}
+
+---@private
+Pool.__index = Pool
+
+---@private
+function Pool:__tostring()
+    local client = self.clients[1] -- first client MUST BE ALWAYS PRESENT
+    return string.format("PGPool<%s@%s:%d/%s (%d/%d clients)>",
+        client:user(), client:host(), client:port(), client:db(), #self.clients, self.max)
+end
+
+---@private
+---@return boolean
+function Pool:acquireClient()
+    if self.queue:size() == 0 then
+        return true
+    end
+
+    for _, client in ipairs(self.clients) do
+        if not client.acquired then
+            -- first we must lock client
+            client.acquired = true
+            client.pool = self
+
+            -- then if client is ready to use, just call callback immideatly
+            if client:connected() then
+                local callback = self.queue:pop()
+                xpcall(callback, ErrorNoHaltWithStack, client)
+                -- if client was not connected, begin connection process
+                -- unless it's already connecting, then just wait until it will be connected
+            elseif not client.connecting then
+                client:connect(function(ok, err)
+                    if ok then
+                        client:release()
+                        self:acquireClient()
+                        return
+                    end
+
+                    ErrorNoHaltWithStack("PGPool - failed to connect to the database: " .. err)
+
+                    -- try to restart acquiring, maybe we can connect with another try
+                    timer.Simple(5, function()
+                        client:release()
+                        self:acquireClient()
+                    end)
+                end)
+            end
+
+            return true
+        end
+    end
+    return false
+end
+
+---@package
+function Pool:processQueue()
+    -- first find available client
+    if self:acquireClient() then
+        -- client was found, nothing to do
+        return
+    end
+
+    -- if we haven't found available clients, and queue is too big, we need to create new client
+    local clients = #self.clients
+    local waiters = self.queue:size()
+    local threshold = clients * 2
+    if clients < self.max and waiters > threshold then
+        self.clients[clients + 1] = async_postgres.Client(self.url)
+        self:acquireClient()
+    end
+end
+
+--- Acquires a first available client from the pool,
+--- or waits until any client will be available
+---
+--- If waiting queue exceeds the power of 2 of the number of clients,
+--- new client will be created and connected
+---
+--- After you are done with client, you MUST release it with client:release()
+--- ```lua
+--- pool:connect(function(client)
+---     client:query("select now()", function(ok, res)
+---         client:release() -- DO NOT FORGET TO RELEASE CLIENT
+---         -- ...
+---     end)
+--- end)
+--- ```
+---@see PGClient.release for releasing client after you are done with it
+---@param callback fun(client: PGClient)
+function Pool:connect(callback)
+    self.queue:push(callback)
+    self:processQueue()
+end
+
+--- Sends a query to the server
+---@see PGClient.query
+---@param query string
+---@param callback PGQueryCallback
+function Pool:query(query, callback)
+    return self:connect(function(client)
+        return client:query(query, function(...)
+            client:release()
+            return callback(...)
+        end)
+    end)
+end
+
+--- Sends a query with given parameters to the server
+---@see PGClient.queryParams
+---@param query string
+---@param params PGAllowedParam[]
+---@param callback PGQueryCallback
+function Pool:queryParams(query, params, callback)
+    return self:connect(function(client)
+        return client:queryParams(query, params, function(...)
+            client:release()
+            return callback(...)
+        end)
+    end)
+end
+
+--- Sends a request to create prepared statement
+---@see PGClient.prepare
+---@param name string
+---@param query string
+---@param callback PGQueryCallback
+function Pool:prepare(name, query, callback)
+    return self:connect(function(client)
+        return client:prepare(name, query, function(...)
+            client:release()
+            return callback(...)
+        end)
+    end)
+end
+
+--- Sends a request to execute prepared statement
+---@see PGClient.queryPrepared
+---@param name string
+---@param params PGAllowedParam[]
+---@param callback PGQueryCallback
+function Pool:queryPrepared(name, params, callback)
+    return self:connect(function(client)
+        return client:queryPrepared(name, params, function(...)
+            client:release()
+            return callback(...)
+        end)
+    end)
+end
+
+--- Sends a request to describe prepared statement
+---@see PGClient.describePrepared
+---@param name string
+---@param callback PGQueryCallback
+function Pool:describePrepared(name, callback)
+    return self:connect(function(client)
+        return client:describePrepared(name, function(...)
+            client:release()
+            return callback(...)
+        end)
+    end)
+end
+
+--- Sends a request to describe portal
+---@see PGClient.describePortal
+---@param name string
+---@param callback PGQueryCallback
+function Pool:describePortal(name, callback)
+    return self:connect(function(client)
+        return client:describePortal(name, function(...)
+            client:release()
+            return callback(...)
+        end)
+    end)
+end
+
+local function transactionThread(client, callback)
+    xpcall(function()
+        local ctx = TransactionContext.new(client)
+        local ok = xpcall(function()
+            ctx:query("BEGIN")
+            callback(ctx)
+            ctx:query("COMMIT")
+        end, ErrorNoHaltWithStack)
+
+        if not ok then
+            ctx:query("ROLLBACK")
+        end
+    end, ErrorNoHaltWithStack)
+    client:release()
+end
+
+--- Begins a transaction and runs callback with transaction context
+---
+--- at the end transaction will be commited,
+--- if any error will be thrown, transaction will be rolled back
+---
+--- TransactionContext passed into callback has `query`, `queryParams`, `prepare`, `queryPrepared`, `describePrepared`, `describePortal` methods
+--- ```lua
+--- pool:transaction(function(ctx)
+---     local oid = ctx:queryParams("INSERT INTO players (name, id) VALUES ($1, $2)", { "Player", 1234 }).oid
+---     local data = ctx:queryParams("SELECT * FROM players WHERE OID = $1", { oid }).rows[1]
+---     PrintTable(data)
+--- end)
+--- ```
+---@see PGTransactionContext
+---@param callback async fun(ctx: PGTransactionContext)
+function Pool:transaction(callback)
+    return self:connect(function(client)
+        local co = coroutine.create(transactionThread)
+        coroutine.resume(co, client, callback)
+    end)
+end
+
+--- Creates a new connection pool with given connection url,
+--- then use :connect() to get available connection,
+--- and then :release() to release it back to the pool
+function async_postgres.Pool(url)
+    return setmetatable({
+        url = url,
+        clients = { async_postgres.Client(url) },
+        queue = Queue.new(),
+        max = 10,
+    }, Pool)
 end
