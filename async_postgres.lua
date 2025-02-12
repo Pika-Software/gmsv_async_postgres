@@ -165,7 +165,6 @@ end
 ---@field private retryAttempted number number of attempts to reconnect to the database
 ---@field private conn PGconn native connection object (do not use it directly, otherwise be careful not to store it anywhere else, otherwise closing connection will be impossible)
 ---@field private queries { push: fun(self, q: PGQuery), prepend: fun(self, q: PGQuery), pop: (fun(self): PGQuery), size: fun(self): number } list of queries
----@field private notifyCallback function? callback for NOTIFY messages
 ---@field package acquired boolean
 ---@field package pool PGPool?
 local Client = {}
@@ -235,7 +234,10 @@ function Client:connect(callback)
         if ok then
             ---@cast conn PGconn
             self.conn = conn
-            pcall(self.conn.setNotifyCallback, self.conn, self.notifyCallback)
+            self.conn:setNotifyCallback(function(channel, payload, backendPID)
+                self:onNotify(channel, payload, backendPID)
+            end)
+
             xpcall(callback, ErrorNoHaltWithStack, ok)
             self:processQueue()
         else
@@ -481,15 +483,6 @@ function Client:pendingQueries()
     return self.queries:size()
 end
 
---- Sets a callback for NOTIFY messages
----@param callback fun(channel: string, payload: string, backendPID: number)
-function Client:setNotifyCallback(callback)
-    self.notifyCallback = callback
-    if self.conn then
-        self.conn:setNotifyCallback(callback)
-    end
-end
-
 --- Returns the database name of the connection.
 ---@return string
 function Client:db()
@@ -655,6 +648,15 @@ function Client:release()
 
     ---@cast pool PGPool
     pool:processQueue() -- after client was release, we need to process pool queue
+end
+
+--- This function is called when NOTIFY message is received
+---
+--- You can set it to your own function to handle NOTIFY messages
+---@param channel string
+---@param payload string
+---@param backendPID number
+function Client:onNotify(channel, payload, backendPID)
 end
 
 --- Creates a new client with given connection url
