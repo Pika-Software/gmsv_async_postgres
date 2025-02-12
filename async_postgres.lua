@@ -161,8 +161,6 @@ end
 ---@field url string **readonly** connection url
 ---@field connecting boolean **readonly** is client connecting to the database
 ---@field closed boolean **readonly** is client closed (to change it to true use `:close()`)
----@field maxRetries number maximum number of retries to reconnect to the database if connection was lost (set to 0 to disable)
----@field private retryAttempted number number of attempts to reconnect to the database
 ---@field private conn PGconn native connection object (do not use it directly, otherwise be careful not to store it anywhere else, otherwise closing connection will be impossible)
 ---@field private queries { push: fun(self, q: PGQuery), prepend: fun(self, q: PGQuery), pop: (fun(self): PGQuery), size: fun(self): number } list of queries
 ---@field package acquired boolean
@@ -274,39 +272,10 @@ function Client:wait()
     return self.conn:wait()
 end
 
---- Tries to reconnect to the database,
---- if maximum number will be reached, we will stop trying to reconnect
----
---- WARNING! If number of attempts is exceeded, first query will be failed
----@private
-function Client:tryReconnect()
-    if self.retryAttempted < self.maxRetries and not self.closed then
-        self.retryAttempted = self.retryAttempted + 1
-        self:reset(function(ok)
-            if not ok and not self:connected() then
-                timer.Simple(5, function()
-                    self:tryReconnect()
-                end)
-            end
-        end)
-    else
-        local query = self.queries:pop()
-        query.callback(false, "connection to the databse was lost, maximum number of retries exceeded")
-    end
-end
-
 ---@private
 ---@param query PGQuery
 function Client:runQuery(query)
     local function callback(ok, result, errdata)
-        -- if connection was lost, put query back into the queue (it was popped before)
-        -- and try to reconnect
-        if not ok and not self:connected() and self.retryAttempted < self.maxRetries then
-            self.queries:prepend(query)
-            self:tryReconnect()
-            return
-        end
-
         xpcall(query.callback, ErrorNoHaltWithStack, ok, result, errdata)
         self:processQueue()
     end
@@ -680,8 +649,6 @@ function async_postgres.Client(url)
         url = url,
         connecting = false,
         queries = Queue.new(),
-        maxRetries = math.huge,
-        retryAttempted = 0,
     }, Client)
 end
 
