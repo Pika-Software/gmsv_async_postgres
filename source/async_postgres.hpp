@@ -23,23 +23,18 @@ namespace GLua = GarrysMod::Lua;
     reinterpret_cast<GLua::ILuaInterface*>(L->luabase); \
     L->luabase->SetState(L)
 
-#define lua_protected_fn(name)                                                 \
-    int name##__Imp(GLua::ILuaInterface* lua);                                 \
-    int name(lua_State* L) {                                                   \
-        auto lua = lua_interface();                                            \
-        const auto start = std::chrono::high_resolution_clock::now();          \
-        try {                                                                  \
-            int ret = name##__Imp(lua);                                        \
-            const auto end = std::chrono::high_resolution_clock::now();        \
-            const std::chrono::duration<double, std::milli> dur = end - start; \
-            if (dur.count() > 1)                                               \
-                lua->Msg(#name " execution time: %.2fms\n", dur.count());      \
-            return ret;                                                        \
-        } catch (const std::exception& e) {                                    \
-            lua->ThrowError(e.what());                                         \
-            return 0;                                                          \
-        }                                                                      \
-    }                                                                          \
+#define lua_protected_fn(name)                 \
+    int name##__Imp(GLua::ILuaInterface* lua); \
+    int name(lua_State* L) {                   \
+        auto lua = lua_interface();            \
+        try {                                  \
+            int ret = name##__Imp(lua);        \
+            return ret;                        \
+        } catch (const std::exception& e) {    \
+            lua->ThrowError(e.what());         \
+            return 0;                          \
+        }                                      \
+    }                                          \
     int name##__Imp([[maybe_unused]] GarrysMod::Lua::ILuaInterface* lua)
 
 namespace async_postgres {
