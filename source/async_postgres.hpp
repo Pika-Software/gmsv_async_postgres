@@ -113,6 +113,7 @@ namespace async_postgres {
         std::shared_ptr<Query> query;
         std::shared_ptr<ResetEvent> reset_event;
         GLua::AutoReference on_notify;
+        bool array_result = false;
 
         Connection(GLua::ILuaInterface* lua, pg::conn&& conn);
         ~Connection();
@@ -139,7 +140,8 @@ namespace async_postgres {
     void process_query(GLua::ILuaInterface* lua, Connection* state);
 
     // result.cpp
-    void create_result_table(GLua::ILuaInterface* lua, PGresult* result);
+    void create_result_table(GLua::ILuaInterface* lua, PGresult* result,
+                             bool array_result);
 
     // misc.cpp
     void register_misc_connection_functions(GLua::ILuaInterface* lua);

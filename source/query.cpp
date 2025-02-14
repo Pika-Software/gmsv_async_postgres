@@ -94,11 +94,11 @@ inline void create_result_error_table(GLua::ILuaInterface* lua,
 }
 
 void query_result(GLua::ILuaInterface* lua, pg::result&& result,
-                  GLua::AutoReference& callback) {
+                  GLua::AutoReference& callback, bool array_result) {
     if (callback.Push()) {
         if (!bad_result(result.get())) {
             lua->PushBool(true);
-            create_result_table(lua, result.get());
+            create_result_table(lua, result.get(), array_result);
             pcall(lua, 2, 0);
         } else {
             lua->PushBool(false);
@@ -144,19 +144,22 @@ void async_postgres::process_result(GLua::ILuaInterface* lua, Connection* state,
             auto query = state->query;
             state->query.reset();
 
-            query_result(lua, std::move(result), query->callback);
+            query_result(lua, std::move(result), query->callback,
+                         state->array_result);
 
             // callback might added another query, process it rightaway
             process_query(lua, state);
         } else {
             // query is not done, but also since we own next result
             // we need to call query callback and process next result
-            query_result(lua, std::move(result), state->query->callback);
+            query_result(lua, std::move(result), state->query->callback,
+                         state->array_result);
             process_result(lua, state, std::move(next_result));
         }
     } else {
         // query is not done, but we don't need to process next result
-        query_result(lua, std::move(result), state->query->callback);
+        query_result(lua, std::move(result), state->query->callback,
+                     state->array_result);
     }
 }
 

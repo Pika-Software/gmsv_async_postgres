@@ -198,6 +198,15 @@ namespace async_postgres::lua {
         return 0;
     }
 
+    lua_protected_fn(getNotifyCallback) {
+        lua->CheckType(1, async_postgres::connection_meta);
+        auto state = lua_connection_state();
+        if (!state->on_notify.Push()) {
+            lua->PushNil();
+        }
+        return 1;
+    }
+
     lua_protected_fn(wait) {
         lua->CheckType(1, async_postgres::connection_meta);
 
@@ -263,6 +272,21 @@ namespace async_postgres::lua {
         lua->PushBool(!!state->reset_event);
         return 1;
     }
+
+    lua_protected_fn(setArrayResult) {
+        lua->CheckType(1, async_postgres::connection_meta);
+        lua->CheckType(2, GLua::Type::Bool);
+        auto state = lua_connection_state();
+        state->array_result = lua->GetBool(2);
+        return 0;
+    }
+
+    lua_protected_fn(getArrayResult) {
+        lua->CheckType(1, async_postgres::connection_meta);
+        auto state = lua_connection_state();
+        lua->PushBool(state->array_result);
+        return 1;
+    }
 }  // namespace async_postgres::lua
 
 #define register_lua_fn(name)                      \
@@ -284,10 +308,13 @@ void register_connection_mt(GLua::ILuaInterface* lua) {
     register_lua_fn(describePortal);
     register_lua_fn(reset);
     register_lua_fn(setNotifyCallback);
+    register_lua_fn(getNotifyCallback);
     register_lua_fn(wait);
     register_lua_fn(isBusy);
     register_lua_fn(querying);
     register_lua_fn(resetting);
+    register_lua_fn(setArrayResult);
+    register_lua_fn(getArrayResult);
 
     async_postgres::register_misc_connection_functions(lua);
 

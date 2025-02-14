@@ -90,6 +90,9 @@
 ---@field escapeBytea       fun(self: PGconn, str: string): string
 ---@field unescapeBytea     fun(self: PGconn, str: string): string
 ---@field setNotifyCallback fun(self: PGconn, callback: fun(channel: string, payload: string, backendPID: number))
+---@field getNotifyCallback fun(self: PGconn): fun(channel: string, payload: string, backendPID: number)
+---@field setArrayResult    fun(self: PGconn, enabled: boolean)
+---@field getArrayResult    fun(self: PGconn): boolean
 
 ---@class PGResult
 ---@field fields { name: string, type: number }[] list of fields in the result
@@ -161,6 +164,7 @@ end
 ---@field url string **readonly** connection url
 ---@field connecting boolean **readonly** is client connecting to the database
 ---@field closed boolean **readonly** is client closed (to change it to true use `:close()`)
+---@field array_result boolean option to receive PGResult row fields as array instead of table (default: false)
 ---@field private conn PGconn native connection object (do not use it directly, otherwise be careful not to store it anywhere else, otherwise closing connection will be impossible)
 ---@field private queries { push: fun(self, q: PGQuery), prepend: fun(self, q: PGQuery), pop: (fun(self): PGQuery), size: fun(self): number } list of queries
 ---@field package acquired boolean
@@ -275,7 +279,17 @@ end
 ---@private
 ---@param query PGQuery
 function Client:runQuery(query)
+    local array_result = self.array_result
+    if array_result then
+        self.conn:setArrayResult(true)
+    end
+
     local function callback(ok, result, errdata)
+        if array_result and not self.conn:querying() then
+            -- final query, reset array result
+            self.conn:setArrayResult(false)
+        end
+
         xpcall(query.callback, ErrorNoHaltWithStack, ok, result, errdata)
         self:processQueue()
     end
@@ -934,6 +948,7 @@ function Pool:describePortal(name, callback)
     end)
 end
 
+---@async
 local function transactionThread(client, callback)
     xpcall(function()
         local ctx = TransactionContext.new(client)

@@ -10,7 +10,7 @@ struct FieldInfo {
 };
 
 void async_postgres::create_result_table(GLua::ILuaInterface* lua,
-                                         PGresult* result) {
+                                         PGresult* result, bool array_result) {
     lua->CreateTable();
 
     std::vector<FieldInfo> fields;
@@ -46,7 +46,11 @@ void async_postgres::create_result_table(GLua::ILuaInterface* lua,
             // skip NULL values
             if (!PQgetisnull(result, i, j)) {
                 // field name
-                lua->PushString(fields[j].name);
+                if (!array_result) {
+                    lua->PushString(fields[j].name);
+                } else {
+                    lua->PushNumber(j + 1);
+                }
 
                 // field value
                 lua->PushString(PQgetvalue(result, i, j),
