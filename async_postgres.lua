@@ -291,6 +291,15 @@ function Client:runQuery(query)
             self.conn:setArrayResult(false)
         end
 
+        if not ok then
+            local success, retry = xpcall(function() return self:onEnd() end, self.errorHandler)
+            if success and retry then
+                self.queries:prepend(query)
+                self:processQueue() -- just in case if we somehow already reconnected
+                return
+            end
+        end
+
         xpcall(query.callback, self.errorHandler, ok, result, errdata)
         self:processQueue()
     end
@@ -457,6 +466,8 @@ function Client:close(wait)
     self.conn = nil
     self.closed = true
     collectgarbage() -- collect PGconn so it will be closed
+
+    xpcall(function() return self:onEnd() end, self.errorHandler)
 end
 
 --- Returns number of queued queries (does not includes currently executing query)
@@ -656,6 +667,13 @@ end
 function Client:onError(message)
     -- return used here to hide additional stack trace
     return ErrorNoHaltWithStack(message)
+end
+
+--- This **event** function is called whenever connection to the server is lost/closed.
+---
+--- You can set it to your own function to handle connection loss.
+---@return boolean? return true if you want to retry last query
+function Client:onEnd()
 end
 
 --- Creates a new client with given connection url
