@@ -43,18 +43,17 @@ void async_postgres::create_result_table(GLua::ILuaInterface* lua,
         lua->PushNumber(i + 1);
         lua->CreateTable();
         for (int j = 0; j < nFields; j++) {
-            lua->PushString(fields[j].name);
+            // skip NULL values
             if (!PQgetisnull(result, i, j)) {
-                if (fields[j].text) {
-                    lua->PushString(PQgetvalue(result, i, j));
-                } else {
-                    lua->PushString(PQgetvalue(result, i, j),
-                                    PQgetlength(result, i, j));
-                }
-            } else {
-                lua->PushNil();
+                // field name
+                lua->PushString(fields[j].name);
+
+                // field value
+                lua->PushString(PQgetvalue(result, i, j),
+                                PQgetlength(result, i, j));
+
+                lua->SetTable(-3);
             }
-            lua->SetTable(-3);
         }
         lua->SetTable(-3);
     }
