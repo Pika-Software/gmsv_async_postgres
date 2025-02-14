@@ -119,6 +119,10 @@ if async_postgres.LUA_API_VERSION ~= 1 then
         "expected 1, got " .. async_postgres.LUA_API_VERSION)
 end
 
+
+---@class async_postgres_module : async_postgres
+local module = setmetatable({}, { __index = async_postgres })
+
 local Queue = {}
 Queue.__index = Queue
 
@@ -692,7 +696,7 @@ end
 --- connectiong url format can be found at https://www.postgresql.org/docs/current/libpq-connect.html#LIBPQ-CONNSTRING
 ---@param url string connection url, see libpq documentation for more information
 ---@return PGClient
-function async_postgres.Client(url)
+function module.Client(url)
     ---@class PGClient
     local client = setmetatable({
         url = url,
@@ -887,7 +891,7 @@ function Pool:processQueue()
     local waiters = self.queue:size()
     local threshold = clients * self.threshold
     if clients < self.max and waiters > threshold then
-        local client = async_postgres.Client(self.url)
+        local client = module.Client(self.url)
         client.onError = function(client, message)
             return self:onError(message)
         end
@@ -1075,11 +1079,11 @@ end
 --- Creates a new connection pool with given connection url,
 --- then use :connect() to get available connection,
 --- and then :release() to release it back to the pool
-function async_postgres.Pool(url)
+function module.Pool(url)
     ---@class PGPool
     local pool = setmetatable({
         url = url,
-        clients = { async_postgres.Client(url) },
+        clients = { module.Client(url) },
         queue = Queue.new(),
         max = 10,
         threshold = 5,
@@ -1093,3 +1097,5 @@ function async_postgres.Pool(url)
 
     return pool
 end
+
+return module
