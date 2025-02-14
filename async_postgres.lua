@@ -167,6 +167,7 @@ end
 ---@field array_result boolean option to receive PGResult row fields as array instead of table (default: false)
 ---@field private conn PGconn native connection object (do not use it directly, otherwise be careful not to store it anywhere else, otherwise closing connection will be impossible)
 ---@field private queries { push: fun(self, q: PGQuery), prepend: fun(self, q: PGQuery), pop: (fun(self): PGQuery), size: fun(self): number } list of queries
+---@field package errorHandler function function that just calls self:onError(...)
 ---@field package acquired boolean
 ---@field package pool PGPool?
 local Client = {}
@@ -203,7 +204,7 @@ function Client:reset(callback)
             self.retryAttempted = 0
         end
 
-        xpcall(callback, ErrorNoHaltWithStack, ok, err)
+        xpcall(callback, self.errorHandler, ok, err)
         self:processQueue()
     end)
 
@@ -237,10 +238,10 @@ function Client:connect(callback)
             ---@cast conn PGconn
             self.conn = conn
             self.conn:setNotifyCallback(function(channel, payload, backendPID)
-                self:onNotify(channel, payload, backendPID)
+                xpcall(self.onNotify, self.errorHandler, self, channel, payload, backendPID)
             end)
 
-            xpcall(callback, ErrorNoHaltWithStack, ok)
+            xpcall(callback, self.errorHandler, ok)
             self:processQueue()
         else
             ---@cast conn string
@@ -250,7 +251,7 @@ function Client:connect(callback)
 
     -- async_postgres.connect() can throw error if for example url is invalid
     if not ok then
-        xpcall(callback, ErrorNoHaltWithStack, false, err)
+        xpcall(callback, self.errorHandler, false, err)
         return
     end
 
@@ -290,7 +291,7 @@ function Client:runQuery(query)
             self.conn:setArrayResult(false)
         end
 
-        xpcall(query.callback, ErrorNoHaltWithStack, ok, result, errdata)
+        xpcall(query.callback, self.errorHandler, ok, result, errdata)
         self:processQueue()
     end
 
@@ -319,7 +320,7 @@ function Client:processQueue()
     local query = self.queries:pop()
     local ok, err = pcall(self.runQuery, self, query)
     if not ok then
-        xpcall(query.callback, ErrorNoHaltWithStack, false, err)
+        xpcall(query.callback, self.errorHandler, false, err)
     end
 end
 
@@ -434,8 +435,7 @@ function Client:close(wait)
         while self:wait() do
             iterations = iterations + 1
             if iterations > 1000 then
-                ErrorNoHaltWithStack(
-                    "PGClient:close() - waiting for queries too long, closing forcefully")
+                self:onError("PGClient:close() - waiting for queries too long, closing forcefully")
                 break
             end
         end
@@ -444,11 +444,11 @@ function Client:close(wait)
     local iterations = 0
     while self.queries:size() ~= 0 do
         local q = self.queries:pop()
-        xpcall(q.callback, ErrorNoHaltWithStack, false, "connection to the database was closed")
+        xpcall(q.callback, self.errorHandler, false, "connection to the database was closed")
 
         iterations = iterations + 1
         if iterations > 1000 then
-            ErrorNoHaltWithStack("PGClient:close() - queries are infinite, ignoring them")
+            self:onError("PGClient:close() - queries are infinite, ignoring them")
             break
         end
     end
@@ -617,7 +617,8 @@ end
 
 --- Releases client back to the pool, only use after getting it from the pool
 ---@see PGPool.connect to acquire a client from the pool
-function Client:release()
+---@param suppress boolean? if true, then Pool:onRelease won't be called
+function Client:release(suppress)
     if self.acquired == false then
         error("client was not acquired, :release() was called multiple times or misused")
     end
@@ -630,16 +631,31 @@ function Client:release()
     self.pool = nil
 
     ---@cast pool PGPool
+
+    if not suppress then
+        xpcall(function() return pool:onRelease(self) end, self.errorHandler)
+    end
+
     pool:processQueue() -- after client was release, we need to process pool queue
 end
 
---- This function is called when NOTIFY message is received
+--- This **event** function is called when NOTIFY message is received
 ---
 --- You can set it to your own function to handle NOTIFY messages
 ---@param channel string
 ---@param payload string
 ---@param backendPID number
 function Client:onNotify(channel, payload, backendPID)
+end
+
+--- This **event** function is called whenever an error occurs inside connect/query callback.
+---
+--- You can set it to your own function to handle errors.
+--- By default this function calls `ErrorNoHaltWithStack`
+---@param message string error message
+function Client:onError(message)
+    -- return used here to hide additional stack trace
+    return ErrorNoHaltWithStack(message)
 end
 
 --- Creates a new client with given connection url
@@ -659,11 +675,16 @@ end
 ---@param url string connection url, see libpq documentation for more information
 ---@return PGClient
 function async_postgres.Client(url)
-    return setmetatable({
+    ---@class PGClient
+    local client = setmetatable({
         url = url,
         connecting = false,
         queries = Queue.new(),
     }, Client)
+
+    client.errorHandler = function(...) return client:onError(...) end
+
+    return client
 end
 
 ---@class PGTransactionContext
@@ -770,8 +791,10 @@ end
 ---@class PGPool
 ---@field url string **readonly** connection url
 ---@field max number maximum number of clients in the pool (default: 10)
+---@field threshold number threshold of waiting :connect(...) acquire functions to create a new client (default: 5)
 ---@field private clients PGClient[]
 ---@field private queue { push: fun(self, f: function), prepend: fun(self, f: function), pop: (fun(self): function), size: fun(self): number }
+---@field private errorHandler function function that just calls self:onError(...)
 local Pool = {}
 
 ---@private
@@ -799,23 +822,29 @@ function Pool:acquireClient()
 
             -- then if client is ready to use, just call callback immideatly
             if client:connected() then
+                -- notify about acquired client
+                xpcall(function() return self:onAcquire(client) end, client.errorHandler)
+
+                -- call callback
                 local callback = self.queue:pop()
-                xpcall(callback, ErrorNoHaltWithStack, client)
+                xpcall(callback, client.errorHandler, client)
+
                 -- if client was not connected, begin connection process
                 -- unless it's already connecting, then just wait until it will be connected
             elseif not client.connecting then
                 client:connect(function(ok, err)
                     if ok then
-                        client:release()
+                        client:release(true)
+                        xpcall(function() return self:onConnect(client) end, client.errorHandler)
                         self:acquireClient()
                         return
                     end
 
-                    ErrorNoHaltWithStack("PGPool - failed to connect to the database: " .. err)
+                    self:onError("PGPool - failed to connect to the database: " .. err)
 
                     -- try to restart acquiring, maybe we can connect with another try
                     timer.Simple(5, function()
-                        client:release()
+                        client:release(true)
                         self:acquireClient()
                     end)
                 end)
@@ -838,9 +867,14 @@ function Pool:processQueue()
     -- if we haven't found available clients, and queue is too big, we need to create new client
     local clients = #self.clients
     local waiters = self.queue:size()
-    local threshold = clients * 2
+    local threshold = clients * self.threshold
     if clients < self.max and waiters > threshold then
-        self.clients[clients + 1] = async_postgres.Client(self.url)
+        local client = async_postgres.Client(self.url)
+        client.onError = function(client, message)
+            return self:onError(message)
+        end
+
+        self.clients[clients + 1] = client
         self:acquireClient()
     end
 end
@@ -949,6 +983,8 @@ function Pool:describePortal(name, callback)
 end
 
 ---@async
+---@param client PGClient
+---@param callback fun(ctx: PGTransactionContext)
 local function transactionThread(client, callback)
     xpcall(function()
         local ctx = TransactionContext.new(client)
@@ -956,12 +992,12 @@ local function transactionThread(client, callback)
             ctx:query("BEGIN")
             callback(ctx)
             ctx:query("COMMIT")
-        end, ErrorNoHaltWithStack)
+        end, client.errorHandler)
 
         if not ok then
             ctx:query("ROLLBACK")
         end
-    end, ErrorNoHaltWithStack)
+    end, client.errorHandler)
     client:release()
 end
 
@@ -987,14 +1023,55 @@ function Pool:transaction(callback)
     end)
 end
 
+--- This **event** function is called whenever new client connection
+--- was estabileshed.
+--- You can run setup commands on a client.
+--- ```lua
+--- function pool:onConnect(client)
+---     client:query("SET DATESTYLE = iso, mdy")
+--- end
+--- ```
+---@param client PGClient client that was connected
+function Pool:onConnect(client)
+end
+
+--- This **event** function is called whenever a client was acquired.
+---@param client PGClient client that was acquired
+function Pool:onAcquire(client)
+end
+
+--- This **event** function is called whenever an error occurs inside connect/query callback for client or pool.
+---@param message string error message
+---@param client PGClient? client that caused the error, or nil if error happened in pool
+function Pool:onError(message, client)
+    return ErrorNoHaltWithStack(message)
+end
+
+--- This **event** function is called whenever a client was released back to the pool.
+---
+--- Warning! This funct
+---@param client PGClient client that was released
+function Pool:onRelease(client)
+end
+
 --- Creates a new connection pool with given connection url,
 --- then use :connect() to get available connection,
 --- and then :release() to release it back to the pool
 function async_postgres.Pool(url)
-    return setmetatable({
+    ---@class PGPool
+    local pool = setmetatable({
         url = url,
         clients = { async_postgres.Client(url) },
         queue = Queue.new(),
         max = 10,
+        threshold = 5,
     }, Pool)
+
+    pool.clients[1].onError = function(client, message)
+        return pool:onError(message, client)
+    end
+
+    pool.errorHandler = function(...) return pool:onError(...) end
+
+    return pool
 end
