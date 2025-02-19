@@ -69,3 +69,36 @@ void async_postgres::create_result_table(GLua::ILuaInterface* lua,
     lua->PushNumber(PQoidValue(result));
     lua->SetField(-2, "oid");
 }
+
+#define set_error_field(name, field)                                 \
+    {                                                                \
+        const char* field_value = PQresultErrorField(result, field); \
+        if (field_value) {                                           \
+            lua->PushString(field_value);                            \
+            lua->SetField(-2, name);                                 \
+        }                                                            \
+    }
+
+void async_postgres::create_result_error_table(GLua::ILuaInterface* lua,
+                                               const PGresult* result) {
+    lua->CreateTable();
+
+    lua->PushString(PQresStatus(PQresultStatus(result)));
+    lua->SetField(-2, "status");
+
+    set_error_field("severity", PG_DIAG_SEVERITY_NONLOCALIZED);
+    set_error_field("sqlState", PG_DIAG_SQLSTATE);
+    set_error_field("messagePrimary", PG_DIAG_MESSAGE_PRIMARY);
+    set_error_field("messageDetail", PG_DIAG_MESSAGE_DETAIL);
+    set_error_field("messageHint", PG_DIAG_MESSAGE_HINT);
+    set_error_field("statementPosition", PG_DIAG_STATEMENT_POSITION);
+    set_error_field("context", PG_DIAG_CONTEXT);
+    set_error_field("schemaName", PG_DIAG_SCHEMA_NAME);
+    set_error_field("tableName", PG_DIAG_TABLE_NAME);
+    set_error_field("columnName", PG_DIAG_COLUMN_NAME);
+    set_error_field("dataType", PG_DIAG_DATATYPE_NAME);
+    set_error_field("constraintName", PG_DIAG_CONSTRAINT_NAME);
+    set_error_field("sourceFile", PG_DIAG_SOURCE_FILE);
+    set_error_field("sourceLine", PG_DIAG_SOURCE_LINE);
+    set_error_field("sourceFunction", PG_DIAG_SOURCE_FUNCTION);
+}

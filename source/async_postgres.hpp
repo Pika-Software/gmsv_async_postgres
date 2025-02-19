@@ -2,7 +2,6 @@
 #include <GarrysMod/Lua/AutoReference.h>
 #include <GarrysMod/Lua/Interface.h>
 #include <GarrysMod/Lua/LuaInterface.h>
-#include <libpq-fe.h>
 
 #include <algorithm>
 #include <chrono>
@@ -109,10 +108,12 @@ namespace async_postgres {
     };
 
     struct Connection {
+        GLua::ILuaInterface* lua;
         pg::conn conn;
         std::shared_ptr<Query> query;
         std::shared_ptr<ResetEvent> reset_event;
         GLua::AutoReference on_notify;
+        GLua::AutoReference on_notice;
         bool array_result = false;
 
         Connection(GLua::ILuaInterface* lua, pg::conn&& conn);
@@ -142,6 +143,8 @@ namespace async_postgres {
     // result.cpp
     void create_result_table(GLua::ILuaInterface* lua, PGresult* result,
                              bool array_result);
+    void create_result_error_table(GLua::ILuaInterface* lua,
+                                   const PGresult* result);
 
     // misc.cpp
     void register_misc_connection_functions(GLua::ILuaInterface* lua);

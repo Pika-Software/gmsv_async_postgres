@@ -5,7 +5,7 @@ using namespace async_postgres;
 std::vector<Connection*> async_postgres::connections = {};
 
 Connection::Connection(GLua::ILuaInterface* lua, pg::conn&& conn)
-    : conn(std::move(conn)) {
+    : conn(std::move(conn)), lua(lua) {
     // add connection to global list
     connections.push_back(this);
 }
@@ -33,6 +33,17 @@ inline bool socket_is_ready(PGconn* conn, PostgresPollingStatusType status) {
                 (status == PGRES_POLLING_WRITING && socket.write_ready));
     }
     return true;
+}
+
+static void noticeReceiver(void* arg, const PGresult* res) {
+    auto state = static_cast<Connection*>(arg);
+    if (state->on_notice.IsValid()) {
+        auto lua = state->lua;
+        state->on_notice.Push();
+        lua->PushString(PQresultErrorMessage(res));
+        create_result_error_table(lua, res);
+        pcall(lua, 2, 0);
+    }
 }
 
 void async_postgres::connect(GLua::ILuaInterface* lua, std::string_view url,
@@ -64,6 +75,8 @@ inline bool poll_pending_connection(GLua::ILuaInterface* lua,
     event.status = PQconnectPoll(event.conn.get());
     if (event.status == PGRES_POLLING_OK) {
         auto state = new Connection(lua, std::move(event.conn));
+
+        PQsetNoticeReceiver(state->conn.get(), noticeReceiver, state);
 
         event.callback.Push();
         lua->PushBool(true);

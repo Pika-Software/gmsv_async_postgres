@@ -207,6 +207,26 @@ namespace async_postgres::lua {
         return 1;
     }
 
+    lua_protected_fn(setNoticeCallback) {
+        lua->CheckType(1, async_postgres::connection_meta);
+
+        auto state = lua_connection_state();
+        if (lua->IsType(2, GLua::Type::Function)) {
+            state->on_notice = GLua::AutoReference(lua, 2);
+        }
+
+        return 0;
+    }
+
+    lua_protected_fn(getNoticeCallback) {
+        lua->CheckType(1, async_postgres::connection_meta);
+        auto state = lua_connection_state();
+        if (!state->on_notice.Push()) {
+            lua->PushNil();
+        }
+        return 1;
+    }
+
     lua_protected_fn(wait) {
         lua->CheckType(1, async_postgres::connection_meta);
 
@@ -309,6 +329,8 @@ void register_connection_mt(GLua::ILuaInterface* lua) {
     register_lua_fn(reset);
     register_lua_fn(setNotifyCallback);
     register_lua_fn(getNotifyCallback);
+    register_lua_fn(setNoticeCallback);
+    register_lua_fn(getNoticeCallback);
     register_lua_fn(wait);
     register_lua_fn(isBusy);
     register_lua_fn(querying);

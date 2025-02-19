@@ -91,6 +91,8 @@
 ---@field unescapeBytea     fun(self: PGconn, str: string): string
 ---@field setNotifyCallback fun(self: PGconn, callback: fun(channel: string, payload: string, backendPID: number))
 ---@field getNotifyCallback fun(self: PGconn): fun(channel: string, payload: string, backendPID: number)
+---@field setNoticeCallback fun(self: PGconn, callback: fun(message: string, errdata: table))
+---@field getNoticeCallback fun(self: PGconn): fun(message: string, errdata: table)
 ---@field setArrayResult    fun(self: PGconn, enabled: boolean)
 ---@field getArrayResult    fun(self: PGconn): boolean
 
@@ -118,10 +120,6 @@ if async_postgres.LUA_API_VERSION ~= 1 then
     error("async_postgres module has different Lua API version, " ..
         "expected 1, got " .. async_postgres.LUA_API_VERSION)
 end
-
-
----@class async_postgres_module : async_postgres
-local module = setmetatable({}, { __index = async_postgres })
 
 local Queue = {}
 Queue.__index = Queue
@@ -243,6 +241,9 @@ function Client:connect(callback)
             self.conn = conn
             self.conn:setNotifyCallback(function(channel, payload, backendPID)
                 xpcall(self.onNotify, self.errorHandler, self, channel, payload, backendPID)
+            end)
+            self.conn:setNoticeCallback(function(message, errdata)
+                xpcall(self.onNotice, self.errorHandler, self, message, errdata)
             end)
 
             xpcall(callback, self.errorHandler, ok)
@@ -663,6 +664,17 @@ end
 function Client:onNotify(channel, payload, backendPID)
 end
 
+--- This **event** function is called when server sends a notice/warning message
+--- during a query
+---
+--- You can set it to your own function to handle notices
+--- By default this function calls `ErrorNoHalt`
+---@param message string notice message
+---@param errdata table additional data
+function Client:onNotice(message, errdata)
+    ErrorNoHalt(tostring(self) .. " " .. message)
+end
+
 --- This **event** function is called whenever an error occurs inside connect/query callback.
 ---
 --- You can set it to your own function to handle errors.
@@ -696,7 +708,7 @@ end
 --- connectiong url format can be found at https://www.postgresql.org/docs/current/libpq-connect.html#LIBPQ-CONNSTRING
 ---@param url string connection url, see libpq documentation for more information
 ---@return PGClient
-function module.Client(url)
+function async_postgres.Client(url)
     ---@class PGClient
     local client = setmetatable({
         url = url,
@@ -891,7 +903,7 @@ function Pool:processQueue()
     local waiters = self.queue:size()
     local threshold = clients * self.threshold
     if clients < self.max and waiters > threshold then
-        local client = module.Client(self.url)
+        local client = async_postgres.Client(self.url)
         client.onError = function(client, message)
             return self:onError(message)
         end
@@ -1079,11 +1091,12 @@ end
 --- Creates a new connection pool with given connection url,
 --- then use :connect() to get available connection,
 --- and then :release() to release it back to the pool
-function module.Pool(url)
+---@return PGPool
+function async_postgres.Pool(url)
     ---@class PGPool
     local pool = setmetatable({
         url = url,
-        clients = { module.Client(url) },
+        clients = { async_postgres.Client(url) },
         queue = Queue.new(),
         max = 10,
         threshold = 5,
