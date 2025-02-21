@@ -5,9 +5,9 @@
 
 #include <algorithm>
 #include <chrono>
-#include <exception>
 #include <memory>
 #include <queue>
+#include <stdexcept>
 #include <string_view>
 #include <variant>
 #include <vector>
