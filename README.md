@@ -6,32 +6,32 @@ using [libpq] with asynchronousity in mind.
 Besides binary module you'll probably need to add [`async_postgres.lua`][lua module] to your project.
 
 ## Features
-* Fully asynchronous, yet allows to wait a query to finish
+* Fully asynchronous, yet allows to wait for a query to finish
 * Provides full simplified [libpq] interface
-* Simple, robust and efficient
+* Simple, robust, and efficient
 * Flexible [lua module] which extends functionality
-* [Type friendly][LuaLS] [lua module] with documentatio
+* [Type friendly][LuaLS] [lua module] with documentation
 
 ## Installation
 1. Go to [releases](https://github.com/Pika-Software/gmsv_async_postgres/releases)
 2. Download `async_postgres.lua` and `gmsv_async_postgres_xxx.dll` files
 > [!NOTE]
-> If are unsure which binary to download, you can run this command inside console of your server
+> If you are unsure which binary to download, you can run this command inside the console of your server
 > ```lua
 > lua_run print("gmsv_async_postgres_" .. (system.IsWindows() and "win" or system.IsOSX() and "osx" or "linux") .. (jit.arch == "x64" and "64" or not system.IsLinux() and "32" or "") .. ".dll")
 > ```
-3. Put `gmsv_async_postgres_xxx.dll` inside `garrysmod/lua/bin/` folder (if folder does not exists, create it)
+3. Put `gmsv_async_postgres_xxx.dll` inside the `garrysmod/lua/bin/` folder (if the folder does not exist, create it)
 4. Put `async_postgres.lua` inside `garrysmod/lua/autorun/server/` or inside your project folder
 5. Profit 🎉
 
 ## Caveats
-* when `queryParams` is used and parameters is `string`, then string will be sent as bytes!<br>
-    You'll need to convert numbers **exclipitly** to `number` type, otherwise
-    PostgreSQL will interpent parameter as binary integer, and will return error
-    or unexpected results may happend.
+* When `queryParams` is used and the parameter is `string`, then the string will be sent as bytes!<br>
+    You'll need to convert numbers **explicitly** to the `number` type, otherwise
+    PostgreSQL will interpret the parameter as a binary integer, and will return an error
+    or unexpected results may happen.
 
 * Result rows are returned as strings, you'll need to convert them to numbers if needed.
-* You'll need to use `Client:unescapeBytea(...)` to convert bytea data to string from reuslt.
+* You'll need to use `Client:unescapeBytea(...)` to convert bytea data to string from the result.
 
 ## Usage
 `async_postgres.Client` usage example
@@ -49,11 +49,11 @@ client:connect(function(ok, err)
 end)
 
 -- PostgreSQL can only process one query at a time,
--- but async_postgres.Client has internal queue for queries
+-- but async_postgres.Client has an internal queue for queries
 -- so you can queue up as many queries as you want
 -- and they will be executed one by one when possible
 --
--- For example this query will be executed after the connection is established
+-- For example, this query will be executed after the connection is established
 client:query("select now()", function(ok, res)
     assert(ok, res)
     print("Current time is " .. res.rows[1].now)
@@ -88,7 +88,7 @@ client:close() -- passing true will wait for all queries to finish, but we did w
 ```lua
 local pool = async_postgres.Pool("postgresql://postgres:postgres@localhost")
 
--- You can make same queries as with Client
+-- You can make the same queries as with Client
 -- but with Pool you don't need to worry about connection
 -- Pool will manage connections for you
 pool:query("select now()", function(ok, res)
@@ -110,13 +110,13 @@ pool:transaction(function(ctx)
     print("Value in transaction is: " .. res.rows[1].value) -- will output "Value in transaction is barfoo"
 
     -- If error happens in transaction, it will be rolled back
-    error("welp something went wrong :p)
+    error("welp something went wrong :p")
 
-    -- if no error happens, transaction will be commited
+    -- if no error happens, transaction will be committed
 end)
 
--- Or you can use :connect() to create your own transactions or for smth else
--- :connect() will acquire first available connected Client from the Pool
+-- Or you can use :connect() to create your own transactions or for something else
+-- :connect() will acquire the first available connected Client from the Pool
 -- and you'll need to call client:release() when you're done
 pool:connect(function(client)
     client:query("select now()", function(ok, res)
@@ -174,7 +174,7 @@ end)
 - `Client:parameterStatus(paramName)`: Looks up a current parameter setting
 - `Client:protocolVersion()`: Interrogates the frontend/backend protocol being used
 - `Client:serverVersion()`: Returns the server version as integer
-- `Client:errorMessage()`: Returns last error message
+- `Client:errorMessage()`: Returns the last error message
 - `Client:backendPID()`: Returns the backend process ID
 - `Client:sslInUse()`: Returns true if SSL is used
 - `Client:sslAttribute(name)`: Returns SSL-related information
