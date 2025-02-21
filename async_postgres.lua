@@ -826,6 +826,7 @@ end
 ---@field url string **readonly** connection url
 ---@field max number maximum number of clients in the pool (default: 10)
 ---@field threshold number threshold of waiting :connect(...) acquire functions to create a new client (default: 5)
+---@field closed boolean **readonly** is pool closed
 ---@field private clients PGClient[]
 ---@field private queue { push: fun(self, f: function), prepend: fun(self, f: function), pop: (fun(self): function), size: fun(self): number }
 ---@field private errorHandler function function that just calls self:onError(...)
@@ -931,6 +932,10 @@ end
 ---@see PGClient.release for releasing client after you are done with it
 ---@param callback fun(client: PGClient)
 function Pool:connect(callback)
+    if self.closed then
+        error("pool was closed")
+    end
+
     self.queue:push(callback)
     self:processQueue()
 end
@@ -1055,6 +1060,16 @@ function Pool:transaction(callback)
         local co = coroutine.create(transactionThread)
         coroutine.resume(co, client, callback)
     end)
+end
+
+--- Closes the pool and all clients in it
+--- If `wait = true`, will wait until all queries are processed
+---@param wait boolean?
+function Pool:close(wait)
+    for _, client in ipairs(self.clients) do
+        client:close(wait)
+    end
+    self.closed = true
 end
 
 --- This **event** function is called whenever new client connection
